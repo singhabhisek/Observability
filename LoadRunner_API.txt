@@ -1,0 +1,101 @@
+import os
+import io
+import json
+import zipfile
+import requests
+import pyodbc
+from base64 import b64encode
+
+def authenticate(host, login, password):
+    """Authenticate user and establish a session."""
+    session = requests.Session()
+    auth_token = b64encode(f"{login}:{password}".encode("unicode_escape")).decode("utf-8")
+    session.headers.update({'Authorization': f"Basic {auth_token}", 'Accept': 'application/json'})
+    response = session.get(url=f'{host}/LoadTest/rest/authentication-point/authenticate')
+    return session if response.ok else None
+
+def get_test_results_metadata(session, host, domain, project, run_id):
+    """Retrieve metadata of test results for a given run ID."""
+    project_rest_api = f"{host}/LoadTest/rest/domains/{domain}/projects/{project}"
+    response = session.get(url=f'{project_rest_api}/Runs/{run_id}/Results')
+    return response.json() if response.ok else None
+
+def download_and_extract_results(session, host, domain, project, run_id, file_name, destination_dir):
+    """Download and extract a specified file from test results."""
+    if not os.path.exists(destination_dir):
+        os.makedirs(destination_dir)
+    
+    test_results = get_test_results_metadata(session, host, domain, project, run_id)
+    if not test_results:
+        print("Failed to retrieve test results metadata.")
+        return None
+    
+    project_rest_api = f"{host}/LoadTest/rest/domains/{domain}/projects/{project}"
+    
+    for file in test_results:
+        if file['Name'] == file_name:
+            file_id = str(file['ID'])
+            response = session.get(url=f'{project_rest_api}/Runs/{run_id}/Results/{file_id}/data')
+            
+            if response.ok:
+                zip_path = os.path.join(destination_dir, f"{file_name}.zip")
+                with open(zip_path, 'wb') as zip_file:
+                    zip_file.write(response.content)
+                
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(destination_dir)
+                
+                print(f"{file_name} downloaded and extracted successfully.")
+                return destination_dir  # Return extracted directory path
+            else:
+                print(f"Failed to download {file_name}.")
+    return None
+
+def query_mdb_results(mdb_path):
+    """Execute SQL query on the extracted .mdb file and return results."""
+    if not os.path.exists(mdb_path):
+        print("MDB file not found.")
+        return None
+
+    conn_str = f'DRIVER={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={mdb_path};'
+    conn = pyodbc.connect(conn_str)
+    cursor = conn.cursor()
+    
+    query = '''
+    SELECT Event_map.[Event Name], Count(*) AS Samples, Min(Event_meter.Value) AS Minimum, 
+           Avg(Event_meter.Value) AS Average, Max(Event_meter.Value) AS Maximum, 
+           StDev(Event_meter.Value) AS [Standard Deviation], Sum(Event_meter.Value) AS TotalTime 
+    FROM TransactionEndStatus 
+    INNER JOIN (Event_map INNER JOIN Event_meter ON Event_map.[Event ID] = Event_meter.[Event ID]) 
+    ON TransactionEndStatus.Status1 = Event_meter.Status1 
+    WHERE (((TransactionEndStatus.[Transaction End Status])="Pass")) 
+    GROUP BY Event_map.[Event Name] 
+    ORDER BY Sum(Event_meter.Value) DESC;
+    '''
+    
+    cursor.execute(query)
+    results = cursor.fetchall()
+    conn.close()
+    
+    return results
+
+# Example Usage
+if __name__ == "__main__":
+    HOST = "your_host"
+    DOMAIN = "your_domain"
+    PROJECT = "your_project"
+    LOGIN = "your_login"
+    PASSWORD = "your_password"
+    RUN_ID = "your_run_id"
+    FILE_NAME = "your_results_file.zip"
+    DEST_DIR = "your_destination_directory"
+    MDB_FILE_PATH = os.path.join(DEST_DIR, "your_extracted_mdb_file.mdb")
+    
+    session = authenticate(HOST, LOGIN, PASSWORD)
+    if session:
+        extracted_dir = download_and_extract_results(session, HOST, DOMAIN, PROJECT, RUN_ID, FILE_NAME, DEST_DIR)
+        if extracted_dir:
+            results = query_mdb_results(MDB_FILE_PATH)
+            if results:
+                for row in results:
+                    print(row)
