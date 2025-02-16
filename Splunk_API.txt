@@ -1,0 +1,203 @@
+import requests
+from time import sleep
+import pytz
+from datetime import datetime, timedelta
+import csv
+import sqlite3
+
+# Splunk credentials and host
+splunk_host = "https://localhost:8089"
+username = "admin"
+password = "NewPassword123"
+
+# Function to format Splunk timestamps into human-readable format
+def format_time(timestamp):
+    try:
+        return datetime.strptime(timestamp[:19], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return timestamp  # Return as-is if parsing fails
+
+IST = pytz.timezone("Asia/Kolkata")
+UTC = pytz.utc
+
+# Function to convert "YYYY-MM-DD" format to epoch time
+def convert_to_epoch(time_str, is_end_time=False):
+    try:
+        dt = datetime.strptime(time_str, "%Y-%m-%d")  # Convert string to datetime
+        dt = IST.localize(dt)  # Assume the input date is in IST
+        print (dt)
+        # If it's an end time, adjust it to 23:59:59 to avoid Splunk issues
+        if is_end_time:
+            dt += timedelta(days=1) - timedelta(seconds=1)
+        
+        dt = dt + timedelta(hours=5, minutes=30) #adjust for locatiozation - bad implementation though
+        return str(int(dt.timestamp()))  # Convert to epoch
+    except ValueError:
+        return time_str  # If input is already in epoch format, return as is
+
+# Function to insert results into SQLite
+def insert_into_sqlite(database_name, table_name, headers, results):
+    conn = sqlite3.connect(database_name)
+    cursor = conn.cursor()
+
+    # Create table dynamically based on headers if not exists
+    columns_definition = ", ".join([f'"{col}" TEXT' for col in headers])
+    cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_definition})")
+
+    # Insert data
+    placeholders = ", ".join(["?"] * len(headers))
+    insert_query = f"INSERT INTO {table_name} ({', '.join(headers)}) VALUES ({placeholders})"
+
+    for event in results:
+        row_values = [event.get(h, "0") for h in headers]
+        cursor.execute(insert_query, row_values)
+
+    conn.commit()
+    conn.close()
+    print(f"📀 Data inserted into {database_name}, table: {table_name}")
+
+# Function to execute a Splunk search and return results
+def run_splunk_search(applicationName="tutorialdata*", TestID=None, startTime="0", endTime="now", search_query=""):
+    if not search_query.strip():
+        print("❌ Error: Search query cannot be empty.")
+        return None, None
+
+    # Convert time range
+    startTime = convert_to_epoch(startTime)
+    endTime = convert_to_epoch(endTime, is_end_time=True)
+
+    print(f"⏳ Start Time: {startTime}")
+    print(f"⏳ End Time: {endTime}")
+
+    # Splunk API endpoint for creating a search job
+    search_url = f"{splunk_host}/services/search/jobs"
+
+    try:
+        # Create search job
+        response = requests.post(
+            search_url, 
+            auth=(username, password), 
+            verify=False,  
+            data={"search": search_query, "earliest_time": startTime, "latest_time": endTime, "output_mode": "json"}
+        )
+        
+        if response.status_code != 201:
+            print(f"❌ Error creating search job: {response.status_code} - {response.text}")
+            return None, None
+        
+        sid = response.json().get("sid")
+        if not sid:
+            print("❌ Error: No SID returned from Splunk.")
+            return None, None
+        
+        print(f"✅ Search Job Created. SID: {sid}")
+
+        # Wait for search results to be ready
+        results_url = f"{splunk_host}/services/search/jobs/{sid}/results"
+        sleep(3)
+
+        # Fetch all results
+        results_response = requests.get(
+            results_url, 
+            auth=(username, password), 
+            verify=False,
+            params={"output_mode": "json", "count": 0}
+        )
+
+        if results_response.status_code != 200:
+            print(f"❌ Error retrieving results: {results_response.status_code} - {results_response.text}")
+            return None, None
+
+        results_data = results_response.json()
+        results = results_data.get("results", [])
+        
+        if not results:
+            print("⚠️ No results found.")
+            return None, None
+
+        # Extract all unique fields from results
+        all_columns = set()
+        for event in results:
+            all_columns.update(event.keys())
+
+        # Remove unnecessary fields
+        all_columns.discard("_span")
+        all_columns = sorted(all_columns)
+
+        # Ensure `_time` is the first column
+        if "_time" in all_columns:
+            all_columns.remove("_time")
+            all_columns.insert(0, "_time")
+
+        headers = ["applicationName", "TestID"] + all_columns  
+
+        # Add applicationName and TestID to each row
+        formatted_results = []
+        for event in results:
+            row_data = {
+                "applicationName": applicationName,
+                "TestID": TestID,
+                **{h: format_time(event[h]) if h == "_time" else event.get(h, "0") for h in all_columns}
+            }
+            formatted_results.append(row_data)
+
+        return headers, formatted_results  # Return headers and results as structured data
+
+    except requests.RequestException as e:
+        print(f"❌ Network error: {e}")
+        return None, None
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return None, None
+
+# Function to process and handle results based on user choice
+def handle_results(headers, results, output_mode):
+    if not headers or not results:
+        print("⚠️ No valid data to process.")
+        return
+
+    if output_mode == "print":
+        row_format = "{:<20} " + " ".join(["{:<10}"] * (len(headers) - 1))
+        print("\n=== Splunk Search Results (Table Format) ===\n")
+        print(row_format.format(*headers))
+        print("-" * (20 + (len(headers) - 1) * 12))
+
+        for event in results:
+            row_values = [event.get(h, "0") for h in headers]
+            print(row_format.format(*row_values))
+
+    elif output_mode == "csv":
+        output_file = "splunk_results.csv"
+        try:
+            with open(output_file, mode="w", newline="", encoding="utf-8") as file:
+                writer = csv.writer(file)
+                writer.writerow(headers)
+                for event in results:
+                    row_values = [event.get(h, "0") for h in headers]
+                    writer.writerow(row_values)
+            print(f"📁 Data saved to {output_file}")
+        except Exception as e:
+            print(f"❌ Error writing to CSV: {e}")
+
+    elif output_mode == "sqlite":
+        insert_into_sqlite("splunk_results.db", "splunk_data", headers, results)
+    else:
+        print("⚠️ Invalid output mode selected.")
+
+# Accept user input
+applicationName = input("Enter Application Name (default: tutorialdata*): ") or "tutorialdata*"
+TestID = input("Enter Test ID (or press Enter to skip): ") or None
+startTime = input("Enter Start Time (YYYY-MM-DD or epoch, default: 0): ") or "0"
+endTime = input("Enter End Time (YYYY-MM-DD or epoch, default: now): ") or "now"
+search_query = input("Enter your Splunk search query: ")
+
+# Ask user for output mode
+choice = 1 #input("\nSelect output mode:\n1. Print to console\n2. Save to CSV file\n3. Insert into SQLite database\nEnter choice (1/2/3): ")
+output_modes = {"1": "print", "2": "csv", "3": "sqlite"}
+output_mode = output_modes.get(choice, "print")
+
+# Run search
+headers, results = run_splunk_search(applicationName, TestID, startTime, endTime, search_query)
+
+# Handle results only if they exist
+handle_results(headers, results, output_mode)
