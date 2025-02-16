@@ -1,0 +1,45 @@
+import requests
+import csv
+from io import StringIO
+
+def fetch_dynatrace_metrics(api_url, api_token, metric_selector, entity_tag):
+    headers = {
+        "Authorization": f"Api-Token {api_token}",
+        "Accept": "text/csv"
+    }
+    params = {
+        "metricSelector": metric_selector,
+        "entitySelector": f"type(HOST),tag({entity_tag})"
+    }
+    
+    response = requests.get(f"{api_url}/api/v2/metrics/query", headers=headers, params=params)
+    
+    if response.status_code == 200:
+        csv_data = response.text
+        data = []
+        csv_reader = csv.reader(StringIO(csv_data))
+        next(csv_reader)  # Skip header row
+        for row in csv_reader:
+            data.append({
+                "metricId": row[0],
+                "entity": row[1],
+                "time": row[2],
+                "value": float(row[3])
+            })
+        return data
+    else:
+        raise Exception(f"Error fetching data: {response.status_code} - {response.text}")
+
+# Example usage
+if __name__ == "__main__":
+    API_URL = "https://your-dynatrace-instance.com"
+    API_TOKEN = "your_api_token_here"
+    METRIC_SELECTOR = "builtin:host.mem.usage"
+    ENTITY_TAG = "X"
+    
+    try:
+        metrics = fetch_dynatrace_metrics(API_URL, API_TOKEN, METRIC_SELECTOR, ENTITY_TAG)
+        for metric in metrics:
+            print(metric)
+    except Exception as e:
+        print(e)
