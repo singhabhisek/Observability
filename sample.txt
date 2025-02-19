@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Hello Observability</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container mt-4 dashboard-container">
+        <h1> Sample Observability Dashboard </h1>
+
+        <!-- Filter Section -->
+        <form method="GET" action="/" class="row g-3">
+            <div class="col-md-4">
+                <label for="test_id" class="form-label">Test ID:</label>
+                <select id="test_id" name="test_id" class="form-select searchable-dropdown">
+                    <option value="">Select Test ID</option>
+                    {% for test_id in test_ids %}
+                    <option value="{{ test_id }}">{{ test_id }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-3">
+                <label for="from_date" class="form-label">From Date:</label>
+                <input type="date" id="from_date" name="from_date" class="form-control">
+            </div>
+
+            <div class="col-md-3">
+                <label for="to_date" class="form-label">To Date:</label>
+                <input type="date" id="to_date" name="to_date" class="form-control">
+            </div>
+
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">Filter</button>
+            </div>
+        </form>
+
+        <h2>LoadRunner Transactions</h2>
+        <table id="transactionTable" class="display">
+            <thead>
+                <tr>
+                    {% for header in headers %}
+                    <th>{{ header }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>S05_T01_SearchCompany</td>
+                    <td>0.513</td>
+                    <td>10.087</td>
+                    <td>1.021</td>
+                    <td>1.409</td>
+                    <td>1159</td>
+                    <td>1</td>
+                </tr>
+                <tr>
+                    <td>S05_T02_SearchCompanyID</td>
+                    <td>0</td>
+                    <td>2.429</td>
+                    <td>0.975</td>
+                    <td>1.114</td>
+                    <td>1159</td>
+                    <td>0</td>
+                </tr>
+                <tr>
+                    <td>S05_T03_SearchPerson</td>
+                    <td>0.423</td>
+                    <td>3.533</td>
+                    <td>3.621</td>
+                    <td>1.102</td>
+                    <td>1159</td>
+                    <td>0</td>
+                </tr>
+                <tr>
+                    <td>S99_Logout</td>
+                    <td>0.563</td>
+                    <td>5.842</td>
+                    <td>0.778</td>
+                    <td>29853</td>
+                    <td>1</td>
+                    <td></td>
+                </tr>
+                <!-- Add more rows here as needed -->
+            </tbody>
+        </table>
+
+        <div class="row mt-4 metrics-row">
+            <div class="metric-block">
+                <h2>Total Requests</h2>
+                <p>{{ total_requests }}</p>
+            </div>
+            <div class="metric-block">
+                <h2>Realtime Visitors</h2>
+                <p>{{ realtime_visitors }}</p>
+            </div>
+            <div class="metric-block">
+                <h2>Requests by Status Code</h2>
+                {% for code, count in status_codes.items() %}
+                <p>{{ code }}: {{ count }}</p>
+                {% endfor %}
+            </div>
+        </div>
+
+
+        <div class="chart-row">
+            <div class="chart-block">
+                <h4>Status Codes Pie Chart</h4>
+                <canvas id="statusChart" width="400" height="400"></canvas>
+            </div>
+            <div class="chart-block">
+                <h2>Total Bytes Sent</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Bytes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for endpoint, bytes in bytes_sent.items() %}
+                        <tr>
+                            <td>{{ endpoint }}</td>
+                            <td>{{ bytes }} KB</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="chart-block">
+                <h2>Requests per Minute</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Requests/Minute</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for endpoint, rpm in requests_per_minute.items() %}
+                        <tr>
+                            <td>{{ endpoint }}</td>
+                            <td>{{ rpm }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="chart-block">
+                <h2>Latency</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Latency (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for endpoint, lat in latency.items() %}
+                        <tr>
+                            <td>{{ endpoint }}</td>
+                            <td>{{ lat }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="chart-block">
+                <h2>Error Rate</h2>
+                <p> (Chart placeholder) </p>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <h2>Logs</h2>
+            <ul>
+                {% for log in logs %}
+                <li>{{ log.timestamp }} - {{ log.message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="row mt-4 grid-container">
+
+            <div class="col-md-6">
+                <h2>CPU Usage (Last 5 Hours)</h2>
+                <div style="height: 400px;"><canvas id="cpuUsageChart"></canvas></div>
+            </div>
+            <div class="col-md-6">
+                <h2>Memory Usage (Last 5 Hours)</h2>
+                <div style="height: 400px;"><canvas id="memoryUsageChart"></canvas></div>
+            </div>
+
+            <div class="col-md-6 grid-item">
+                <h4>Failed Request Chart</h4>
+                <canvas id="failedRequestsChart"></canvas>
+            </div>
+            <div class="col-md-6 grid-item">
+                <h4>Request Trend Chart</h4>
+                <canvas class="mt-4" id="requestTrendChart"></canvas>
+            </div>
+            <div class="col-md-6 grid-item">
+                <h4>Failed Request By Source Chart</h4>
+                <canvas id="failedRequestsBySourceChart"></canvas>
+            </div>
+            <div class="col-md-6 grid-item">
+                <h4>Status Code Status Chart</h4>
+                <canvas class="mt-4" id="statusCodeStatsChart"></canvas>
+            </div>
+            <div class="col-md-6 grid-item">
+                <h4>Request Flow Chart</h4>
+                <canvas class="mt-4" id="requestFlowChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+<script>
+
+    $(document).ready(function () {
+        $('#transactionTable').DataTable({
+            paging: true,
+            searching: true,
+            ordering: true
+        });
+    });
+
+
+    var ctx = document.getElementById('statusChart').getContext('2d');
+
+        // Convert the passed status_codes dictionary to an array of labels and values
+        var statusCodes = {{ status_codes | tojson }};
+        var labels = Object.keys(statusCodes);
+        var values = Object.values(statusCodes);
+
+        var statusChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: labels,  <!-- Use the dynamically created labels (status codes) -->
+                datasets: [{
+                    label: 'Status Codes',
+                    data: values,  <!-- Use the dynamically created values (counts) -->
+                    backgroundColor: ['#4CAF50', '#FFC107', '#F44336', '#2196F3', '#9C27B0'],
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(tooltipItem) {
+                                return tooltipItem.label + ': ' + tooltipItem.raw + ' occurrences';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    
+
+
+    // Parse JSON safely without extra whitespace issues
+    var cpuUsageData = {{ cpu_usage_data | tojson }};
+    var memoryUsageData = {{ memory_usage_data | tojson }};
+
+
+
+    // Fix: Ensure 'datasets' exist before creating chart
+    if (cpuUsageData && cpuUsageData.datasets) {
+        new Chart(document.getElementById('cpuUsageChart'), {
+            type: 'line',
+            data: cpuUsageData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    }
+
+    if (memoryUsageData && memoryUsageData.datasets) {
+        new Chart(document.getElementById('memoryUsageChart'), {
+            type: 'line',
+            data: memoryUsageData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    }
+
+    // Failed Requests Chart (Pie Chart)
+    const failedRequestsChart = new Chart(document.getElementById('failedRequestsChart'), {
+        type: 'pie',
+        data: {{ failed_requests_data | tojson }},
+    options: {
+        responsive: true,
+            maintainAspectRatio: false,
+                plugins: {
+            beforeDraw: (chart) => {
+                const ctx = chart.ctx;
+                ctx.font = '16px Arial'; // Adjust font size and family as needed
+                ctx.fillStyle = 'black'; // Adjust color as needed
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText('Top 20 Failed Requests', chart.chartArea.left + chart.chartArea.width / 2, chart.chartArea.top - 10); // Adjust vertical position (-10 for padding)
+            },
+                legend: {
+                position: 'right'
+            }
+        }
+    }
+    });
+
+    // Request Trend Chart (Line Chart)
+    const requestTrendChart = new Chart(document.getElementById('requestTrendChart'), {
+        type: 'line',
+        data: {{ request_trend_data | tojson }},
+    options: {
+        responsive: true,
+            maintainAspectRatio: false,
+                scales: {
+            x: { title: { display: true, text: 'Time' } },
+            y: { title: { display: true, text: 'Requests' } }
+        },
+        plugins: {
+            beforeDraw: (chart) => {
+                const ctx = chart.ctx;
+                ctx.font = '16px Arial'; // Adjust font size and family as needed
+                ctx.fillStyle = 'black'; // Adjust color as needed
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText('Request Trend', chart.chartArea.left + chart.chartArea.width / 2, chart.chartArea.top - 10); // Adjust vertical position (-10 for padding)
+            },
+                legend: {
+                position: 'right'
+            }
+        }
+    }
+    });
+
+    // Failed Requests by Source Chart (Doughnut Chart)
+    const failedRequestsBySourceChart = new Chart(document.getElementById('failedRequestsBySourceChart'), {
+        type: 'doughnut',
+        data: {{ failed_requests_by_source_data | tojson }},
+    options: {
+        responsive: true,
+            maintainAspectRatio: false,
+                plugins: {
+            legend: {
+                position: 'right' // Adjust legend position as needed
+            }
+        }
+    }
+    });
+
+    // Status Code Stats Chart (Bar Chart)
+    const statusCodeStatsChart = new Chart(document.getElementById('statusCodeStatsChart'), {
+        type: 'bar',
+        data: {{ status_code_stats_data | tojson }},
+    options: {
+        responsive: true,
+            maintainAspectRatio: false,
+                scales: {
+            x: { title: { display: true, text: 'Date & Time' }, stacked: true },
+            y: { title: { display: true, text: 'Count' }, stacked: true }
+        }
+    }
+    });
+
+    // Request Flow Chart (Line Chart)
+    const requestFlowChart = new Chart(document.getElementById('requestFlowChart'), {
+        type: 'line',
+        data: {{ request_flow_data | tojson }},
+    options: {
+        responsive: true,
+            maintainAspectRatio: false,
+                scales: {
+            x: { title: { display: true, text: 'Time' } },
+            y: { title: { display: true, text: 'Milliseconds' } }
+        }
+    }
+    });
+</script>
+
+</html>
+
+
+=============
+
+
+
+from flask import Flask, render_template
+
+import json
+
+app = Flask(__name__)
+
+# Placeholder data for charts and tables (replace with your actual data)
+total_requests = 5800
+realtime_visitors = 51
+status_codes = {'200': 281,'201': 41, '500': 11, '403': 53,'502': 21}
+bytes_sent = {'hello': 6.87, 'observability': 3.48} 
+requests_per_minute = {'hello': 6.00, 'observability': 6.00}
+latency = {'hello': 0.100, 'observability': 0.100}
+error_rate = {'hello': 2.0, 'observability': 1.0}  # Example error rate
+logs = [
+    {'timestamp': '2023-11-21 16:30:00', 'message': 'Request received for /hello'},
+    {'timestamp': '2023-11-21 16:30:05', 'message': 'Processed request for /hello'},
+    # ... more log entries
+]
+
+
+failed_requests_data = {
+    'labels': ['EmpApp/Emor/Make EnorDetails', 'EmpApp/Emar Malus Error', 'EmpApp/Cass/viewDetails', 'EmpAppiCass/ShowDetal'],
+    'datasets': [{
+        'data': [384, 192, 106, 106],
+        'backgroundColor': ['#FF5733', '#3498db', '#2ecc71', '#f39c12']  # Example colors
+    }]
+}
+
+request_trend_data = {
+    'labels': ['May 12', 'May 13', 'May 14', 'May 15', 'May 16', 'May 17', 'May 18', 'May 19'],
+    'datasets': [{
+        'label': 'Requests',
+        'data': [10000, 8000, 7000, 16000, 15000, 4000, 13000, 12000],
+        'borderColor': '#3498db',
+        'fill': False
+    }]
+}
+
+failed_requests_by_source_data = {
+    'labels': ['ABC'],
+    'datasets': [{
+        'data': [318],
+        'backgroundColor': ['#e74c3c']  # Example color
+    }]
+}
+
+status_code_stats_data = {
+    'labels': ['Wed, 12 May', 'Thu, 13 May', 'Fri, 14 May', 'Sat, 15 May', 'Sun, 16 May', 'Mon, 17 May', 'Tue, 18 May', 'Wed, 19 May'],
+    'datasets': [
+        {'label': '2XX', 'data': [0, 0, 0, 0, 0, 0, 0, 30], 'backgroundColor': '#2ecc71'},
+        {'label': '3XX', 'data': [0, 0, 0, 0, 0, 0, 0, 0], 'backgroundColor': '#f39c12'},
+        {'label': '4XX', 'data': [0, 0, 0, 144, 144, 288, 0, 0], 'backgroundColor': '#e74c3c'},
+        {'label': '5XX', 'data': [0, 0, 0, 0, 0, 0, 288, 30], 'backgroundColor': '#3498db'}
+    ]
+}
+
+request_flow_data = {
+    'labels': ['May 12', 'May 13', 'May 14', 'May 15', 'May 16', 'May 17', 'May 18', 'May 19'],
+    'datasets': [{
+        'label': 'Request Flow',
+        'data': [11000, 10000, 9000, 8000, 11000, 6000, 8000, 12000],
+        'borderColor': '#95a5a6',
+        'fill': True
+    }]
+}
+
+test_ids = ['Test1', 'Test2', 'Test3', 'Test4']
+
+# Dummy data for CPU and Memory Usage
+cpu_usage_data = {
+    'labels': ['00:00', '01:00', '02:00', '03:00', '04:00'],
+    'datasets': [
+        {'label': 'Server 1', 'data': [20, 30, 40, 35, 20], 'borderColor': '#FF5733', 'fill': False},
+        {'label': 'Server 2', 'data': [25, 35, 45, 40, 45], 'borderColor': '#3498db', 'fill': False},
+        {'label': 'Server 3', 'data': [15, 25, 35, 30, 35], 'borderColor': '#2ecc71', 'fill': False},
+        {'label': 'Server 4', 'data': [30, 40, 50, 45, 10], 'borderColor': '#f1c40f', 'fill': False}
+    ]
+}
+
+memory_usage_data = {
+    'labels': ['00:00', '01:00', '02:00', '03:00', '04:00'],
+    'datasets': [
+        {'label': 'Server 1', 'data': [50, 55, 60, 65, 20], 'borderColor': '#FF5733', 'fill': False},
+        {'label': 'Server 2', 'data': [45, 50, 55, 60, 35], 'borderColor': '#3498db', 'fill': False},
+        {'label': 'Server 3', 'data': [40, 45, 50, 25, 50], 'borderColor': '#2ecc71', 'fill': False},
+        {'label': 'Server 4', 'data': [55, 60, 65, 40, 55], 'borderColor': '#f1c40f', 'fill': False}
+    ]
+}
+
+
+
+data = [
+    ["S05_T01_SearchCompany", 0.513, 10.087, 1.021, 1.409, 1159, 1],
+    ["S05_T02_SearchCompanyID", 0, 2.429, 0.975, 1.114, 1159, 0],
+    ["S05_T03_SearchPerson", 0.423, 3.533, 3.621, 1.102, 1159, 0],
+    ["S99_Logout", 0.563, 5.842, 0.778, 29853, 1],
+    # Add more rows as needed
+]
+
+headers = ["Transaction Name", "Minimum", "Maximum", "Average", "90 Percent", "Count", "Failures"]
+
+
+
+@app.route("/")
+def index():
+
+    # test_id = request.args.get("test_id", "")
+    # from_date = request.args.get("from_date", "")
+    # to_date = request.args.get("to_date", "")
+    
+    # filtered_data = get_filtered_data(test_id, from_date, to_date)
+
+    return render_template(
+        "dashboard.html",
+        test_ids=test_ids,
+        total_requests=total_requests,
+        realtime_visitors=realtime_visitors,
+        status_codes=status_codes,
+        bytes_sent=bytes_sent,
+        requests_per_minute=requests_per_minute,
+        latency=latency,
+        error_rate=error_rate,
+        logs=logs,
+        failed_requests_data=failed_requests_data,
+        request_trend_data=request_trend_data,
+        failed_requests_by_source_data=failed_requests_by_source_data,
+        status_code_stats_data=status_code_stats_data,
+        request_flow_data=request_flow_data,
+        cpu_usage_data=cpu_usage_data,  
+        memory_usage_data=memory_usage_data,
+        data = json.dumps(data),
+        headers = headers
+    )
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
+    ===========================
+
+
+    body {
+    font-family: sans-serif;
+    background-color: #f0f0f0; /* Light gray background */
+    color: #333; /* Dark gray text */
+    margin: 0;
+    padding: 20px;
+}
+
+.dashboard-container {
+    display: flex;
+    flex-direction: column;
+    width: 95%; /* Adjust as needed */
+    margin: 0 auto;
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+    color: #007bff; /* Blue heading */
+    margin-bottom: 20px;
+}
+
+.metrics-row, .chart-row {
+    display: flex;
+    gap: 20px; /* Spacing between blocks */
+    margin-bottom: 20px;
+}
+
+.metric-block, .chart-block {
+    background-color: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    flex: 1; /* Equal width blocks */
+    min-height: 150px; /* Ensure a minimum height */
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th, td {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.log-section {
+    background-color: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.log-section ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+.log-section li {
+    margin-bottom: 5px;
+}
+
+.chart-block canvas {
+    width: 100%; /* Ensure charts fill their container */
+    height: 200px; /* Adjust height as needed */
+}
+
+
+.chart-row {
+    display: flex;             /* Enable flexbox for horizontal layout */
+    flex-wrap: wrap;          /* Allow wrapping to the next line if needed */
+    justify-content: space-between; /* Distribute space between charts */
+    gap: 20px;               /* Spacing between chart blocks */
+    margin-bottom: 20px;       /* Spacing below the chart row */
+}
+
+.chart-block {
+    width: calc(50% - 10px); /* Each chart takes up approximately 50% of the row */
+    height: 400px;           /* Adjust as needed */
+    position: relative;      /* For canvas positioning */
+}
+
+/* For single chart rows (like the Request Flow) */
+.chart-row.single-chart {
+    justify-content: center; /* Center the single chart */
+}
+
+.chart-row.single-chart .chart-block {
+    width: 80%;             /* Make the single chart wider */
+}
+
+.grid-item canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); /* Adjust minmax as needed */
+    grid-gap: 20px;
+}
+
+.grid-item {
+    width: 100%;
+    height: 400px; /* Adjust height as needed */
+    position: relative; /* For canvas positioning */
+}
+
+.grid-item canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
