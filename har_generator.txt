@@ -1,0 +1,113 @@
+import json
+import xml.etree.ElementTree as ET
+import re
+
+def load_har(filepath):
+    with open(filepath, "r", encoding="utf-8") as file:
+        har_data = json.load(file)
+    return [
+        {"url": entry["request"]["url"], "method": entry["request"]["method"]}
+        for entry in har_data["log"]["entries"]
+    ]
+
+def extract_dynamic_values(har_files):
+    dynamic_values = {}
+    common_keys = set()
+    
+    for har_data in har_files:
+        for entry in har_data:
+            url = entry["url"]
+            params = re.findall(r'[?&](\w+)=([^&]+)', url)
+            
+            for key, value in params:
+                if key in dynamic_values:
+                    dynamic_values[key].add(value)
+                else:
+                    dynamic_values[key] = {value}
+    
+    for key, values in dynamic_values.items():
+        if len(values) > 1:
+            common_keys.add(key)
+    
+    return common_keys
+
+def create_jmeter_testplan(har_data, dynamic_keys):
+    jmeter_testplan = ET.Element("jmeterTestPlan", version="1.2", properties="5.0")
+    hash_tree_root = ET.SubElement(jmeter_testplan, "hashTree")
+
+    test_plan = ET.SubElement(hash_tree_root, "TestPlan", guiclass="TestPlanGui", testclass="TestPlan", testname="HAR Converted Test")
+    ET.SubElement(test_plan, "stringProp", name="TestPlan.comments")
+    ET.SubElement(test_plan, "boolProp", name="TestPlan.functional_mode").text = "false"
+    ET.SubElement(test_plan, "boolProp", name="TestPlan.tearDown_on_shutdown").text = "true"
+    ET.SubElement(test_plan, "boolProp", name="TestPlan.serialize_threadgroups").text = "false"
+    user_vars = ET.SubElement(test_plan, "elementProp", name="TestPlan.user_defined_variables", elementType="Arguments", guiclass="ArgumentsPanel", testclass="Arguments", testname="User Defined Variables", enabled="true")
+    ET.SubElement(user_vars, "collectionProp", name="Arguments.arguments")
+    ET.SubElement(test_plan, "stringProp", name="TestPlan.user_define_classpath")
+    
+    hash_tree_testplan = ET.SubElement(hash_tree_root, "hashTree")
+    
+    thread_group = ET.SubElement(hash_tree_testplan, "ThreadGroup", guiclass="ThreadGroupGui", testclass="ThreadGroup", testname="Thread Group", enabled="true")
+    ET.SubElement(thread_group, "stringProp", name="ThreadGroup.on_sample_error").text = "continue"
+    loop_controller = ET.SubElement(thread_group, "elementProp", name="ThreadGroup.main_controller", elementType="LoopController", guiclass="LoopControlPanel", testclass="LoopController", testname="Loop Controller", enabled="true")
+    ET.SubElement(loop_controller, "boolProp", name="LoopController.continue_forever").text = "false"
+    ET.SubElement(loop_controller, "stringProp", name="LoopController.loops").text = "1"
+    ET.SubElement(thread_group, "stringProp", name="ThreadGroup.num_threads").text = "1"
+    ET.SubElement(thread_group, "stringProp", name="ThreadGroup.ramp_time").text = "1"
+    ET.SubElement(thread_group, "boolProp", name="ThreadGroup.scheduler").text = "false"
+    
+    hash_tree_threadgroup = ET.SubElement(hash_tree_testplan, "hashTree")
+    
+    static_extensions = {".css", ".js", ".png", ".jpg", ".gif", ".svg", ".woff", ".woff2", ".ttf", ".ico"}
+    
+    dynamic_values_per_url = {}
+    
+    for entry in har_data:
+        request_url = entry["url"]
+        request_method = entry["method"]
+        
+        if any(request_url.endswith(ext) for ext in static_extensions):
+            continue
+        
+        relevant_dynamic_keys = {key for key in dynamic_keys if key in request_url}
+        
+        for key in relevant_dynamic_keys:
+            request_url = re.sub(fr'([?&]{key}=)([^&]+)', fr'\1${{{key}}}', request_url)
+        
+        sampler = ET.SubElement(hash_tree_threadgroup, "HTTPSamplerProxy", guiclass="HttpTestSampleGui", testclass="HTTPSamplerProxy", testname=request_url)
+        ET.SubElement(sampler, "stringProp", name="HTTPSampler.method").text = request_method
+        ET.SubElement(sampler, "stringProp", name="HTTPSampler.path").text = request_url
+        ET.SubElement(sampler, "stringProp", name="HTTPSampler.postBodyRaw").text = "true"
+        
+        hash_tree_sampler = ET.SubElement(hash_tree_threadgroup, "hashTree")
+        
+        for key in relevant_dynamic_keys:
+            regex_extractor = ET.SubElement(hash_tree_sampler, "RegexExtractor", guiclass="RegexExtractorGui", testclass="RegexExtractor", testname=f"Extract {key}")
+            ET.SubElement(regex_extractor, "stringProp", name="RegexExtractor.useHeaders").text = "false"
+            ET.SubElement(regex_extractor, "stringProp", name="RegexExtractor.refname").text = key
+            ET.SubElement(regex_extractor, "stringProp", name="RegexExtractor.regex").text = fr"{key}=([^&]+)"
+            ET.SubElement(regex_extractor, "stringProp", name="RegexExtractor.template").text = "$1$"
+            ET.SubElement(regex_extractor, "boolProp", name="RegexExtractor.default_empty_value").text = "true"
+            ET.SubElement(regex_extractor, "boolProp", name="RegexExtractor.default_value").text = ""
+            
+            ET.SubElement(hash_tree_sampler, "hashTree")
+        
+        # Attach Response Assertion
+        response_assertion = ET.SubElement(hash_tree_sampler, "ResponseAssertion", guiclass="AssertionGui", testclass="ResponseAssertion", testname="Validate Response")
+        assertion_test_strings = ET.SubElement(response_assertion, "collectionProp", name="Assertion.test_strings")
+        ET.SubElement(assertion_test_strings, "stringProp", name="Assertion.test_string").text = "200"
+        ET.SubElement(response_assertion, "stringProp", name="Assertion.test_field").text = "Assertion.response_code"
+        ET.SubElement(response_assertion, "boolProp", name="Assertion.assume_success").text = "false"
+        ET.SubElement(response_assertion, "intProp", name="Assertion.test_type").text = "2"
+
+        ET.SubElement(hash_tree_sampler, "hashTree")  # Empty hashTree for response assertion
+
+    return ET.tostring(jmeter_testplan, encoding="utf-8").decode("utf-8")
+
+har1 = load_har("D:\\Downloads\\petstore.octoperf.com_1.har")
+har2 = load_har("D:\\Downloads\\petstore.octoperf.com_2.har")
+har_files = [har1, har2]
+
+dynamic_keys = extract_dynamic_values(har_files)
+
+test_plan_xml = create_jmeter_testplan(har_files[0], dynamic_keys)
+print(test_plan_xml)
