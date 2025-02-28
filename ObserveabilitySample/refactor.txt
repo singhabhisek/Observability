@@ -1,0 +1,167 @@
+$(document).ready(function () {
+
+    // Function to fetch server list based on selected application
+    function fetchServers(app) {
+        $.getJSON(`/servers?application=${app}`, function (data) {
+            let $serverDropdown = $('#server_names');
+            $serverDropdown.empty().trigger("change");
+            data.forEach(server => {
+                let newOption = new Option(server.name, server.name, false, false);
+                $serverDropdown.append(newOption);
+            });
+        });
+    }
+
+    // Function to calculate Y-Axis max value for charts
+    function getYAxisMax(data, overrideMax = null) {
+        let maxValue = Math.max(...data) || 0; // Default to 0 if dataset is empty
+        return overrideMax !== null ? overrideMax : Math.ceil((maxValue + 10) / 10) * 10;
+    }
+
+    // Chart.js default configurations
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    usePointStyle: true,
+                    boxWidth: 40,
+                    padding: 10
+                }
+            }
+        },
+        scales: {
+            x: { title: { display: true, text: "Time (HH:MM)" } },
+            y: { beginAtZero: true }
+        }
+    };
+
+    // Function to create and update a chart
+    function createChart(canvasId, chartType, labels, datasets, yAxisLabel = "", yAxisMax = null) {
+        let container = document.getElementById(canvasId).parentElement;
+        let existingCanvas = container.querySelector("canvas");
+
+        if (!datasets.length || datasets.every(ds => ds.data.length === 0)) {
+            container.querySelector(".no-data-message").style.display = "flex";
+            return;
+        }
+
+        if (existingCanvas) existingCanvas.remove();
+
+        let newCanvas = document.createElement("canvas");
+        newCanvas.id = canvasId;
+        container.appendChild(newCanvas);
+
+        let options = { ...chartOptions };
+        if (!["pie", "doughnut"].includes(chartType)) {
+            options.scales.y = { title: { display: true, text: yAxisLabel }, max: yAxisMax };
+        }
+
+        new Chart(newCanvas, { type: chartType, data: { labels, datasets }, options });
+    }
+
+    // Function to generate dynamic colors
+    function getDynamicColors(count) {
+        return Array.from({ length: count }, (_, i) => `hsl(${(i * 360) / count}, 70%, 50%)`);
+    }
+
+    // Function to fetch and populate Host Health Data
+    function fetchHostHealth(applicationName, selectedServers) {
+        let requestData = { applicationName, serverNames: selectedServers };
+
+        $.post("/get_host_health", JSON.stringify(requestData), function (data) {
+            console.log("Host Health Data:", data);
+            $("#cpu_avg").text(`${data.summary.cpu_avg}%`);
+            $("#memory_avg").text(`${data.summary.memory_avg}%`);
+            $("#error_count").text(data.summary.total_errors);
+
+            let honeycombContainer = $("#honeycomb").empty();
+            data.health_data.forEach(server => {
+                let statusClass = server.status.toLowerCase(); // "healthy", "warning", "critical"
+                let serverDiv = `
+                    <div class="hex ${statusClass}" data-tooltip="${server.server} | CPU: ${server.cpu_usage}% | Mem: ${server.memory_usage}% | Errors: ${server.error_count}">
+                        <strong>${server.server}</strong><br>CPU: ${server.cpu_usage}%<br>Mem: ${server.memory_usage}%<br>Errors: ${server.error_count}
+                    </div>`;
+                honeycombContainer.append(serverDiv);
+            });
+        }, "json").fail(() => console.error("Error fetching host health data"));
+    }
+
+    // Function to fetch and render Splunk Data tables
+    function fetchSplunkData(startDate, endDate, granularity) {
+        $.post("/fetch_splunk_data", JSON.stringify({ start_date: startDate, end_date: endDate, granularity }), function (response) {
+            $("#tables-container").empty();
+            Object.entries(response).forEach(([queryName, dataset]) => {
+                let tableId = `table-${queryName.replace(/\s+/g, '-')}`;
+                $("#tables-container").append(`<h4>${queryName}</h4><table id="${tableId}" class="display"></table>`);
+
+                dataset = dataset.error ? [] : dataset;
+                let headers = dataset.length ? Object.keys(dataset[0]) : ["No Data"];
+                let timeColumn = headers.find(h => /^time$|^timestamp$|^eventtime$|^logtime$|^recordedtime$/.test(h.toLowerCase().replace(/\s+/g, '')));
+                if (timeColumn) headers = [timeColumn, ...headers.filter(h => h !== timeColumn)];
+
+                let tableHTML = `<thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>`;
+                if (dataset.length) {
+                    tableHTML += dataset.map(row => `<tr>${headers.map(h => `<td>${row[h] || ''}</td>`).join("")}</tr>`).join("");
+                } else {
+                    tableHTML += `<tr><td colspan="${headers.length}">No data found</td></tr>`;
+                }
+                tableHTML += `</tbody>`;
+
+                $(`#${tableId}`).html(tableHTML).DataTable({
+                    order: timeColumn ? [[headers.indexOf(timeColumn), "asc"]] : [],
+                    autoWidth: false,
+                    searching: dataset.length > 0,
+                    paging: dataset.length > 0,
+                    info: dataset.length > 0
+                });
+            });
+        }).fail(() => $("#tables-container").append("<p>Error fetching data.</p>"));
+    }
+
+    // Function to fetch and render performance metrics
+    function fetchPerformanceMetrics(application, servers, startDate, endDate, granularity) {
+        $.post('/get_data', JSON.stringify({ application, servers, start_date: startDate, end_date: endDate, granularity }), function (data) {
+            let timestamps = data.timestamps || [];
+
+            createChart("statusCodesPie", "pie", Object.keys(data.status_codes), [{
+                data: Object.values(data.status_codes),
+                backgroundColor: getDynamicColors(Object.keys(data.status_codes).length)
+            }], "HTTP Status Codes");
+
+            createChart("serverHitsDonut", "doughnut", Object.keys(data.server_hits), [{
+                data: Object.values(data.server_hits),
+                backgroundColor: getDynamicColors(Object.keys(data.server_hits).length)
+            }], "Server Hits");
+
+            createChart("tpsLineChart", "line", timestamps, Object.entries(data.transactions).map(([transaction, t], index) => ({
+                label: `${transaction} TPS`,
+                data: t.tps_values,
+                borderColor: `hsl(${index * 60}, 70%, 50%)`,
+                fill: false
+            })), "TPS", getYAxisMax(Object.values(data.transactions).flatMap(t => t.tps_values)));
+
+            createChart("responseTimesLine", "line", timestamps, Object.entries(data.transactions).map(([transaction, t], index) => ({
+                label: transaction,
+                data: t.response_times,
+                borderColor: `hsl(${index * 60}, 70%, 50%)`,
+                fill: false
+            })), "Response Time (s)", getYAxisMax(Object.values(data.transactions).flatMap(t => t.response_times)));
+        });
+    }
+
+    // Search button click event
+    $('#search').click(function () {
+        let application = $('#application').val();
+        let servers = $('#server_names').val() || $("#server_names option").map((_, el) => el.value).get();
+        let startDate = $('#start_date').val();
+        let endDate = $('#end_date').val();
+        let granularity = $('#granularity').val();
+
+        fetchSplunkData(startDate, endDate, granularity);
+        fetchHostHealth(application, servers);
+        fetchPerformanceMetrics(application, servers, startDate, endDate, granularity);
+    });
+});
