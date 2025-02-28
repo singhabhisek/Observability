@@ -1,0 +1,785 @@
+from flask import Flask, render_template, request, jsonify
+import random
+import requests
+from datetime import datetime, timedelta, timezone
+import json
+import pytz
+import os
+import io
+import csv
+
+app = Flask(__name__)
+
+import random
+from datetime import datetime, timedelta
+
+# Define UTC and EST timezones
+utc_tz = pytz.utc
+est_tz = pytz.timezone('US/Eastern')
+
+# Splunk API Configuration
+SPLUNK_HOST = "https://splunk-server:8089"
+SPLUNK_USERNAME = "admin"
+SPLUNK_PASSWORD = "password"
+
+# Define Splunk queries and their mock data files
+data_sources = {
+    "IIS Web Traffic Analysis": {
+        "query": "search index=web_logs | stats count, avg(response_time) as avg_time, perc90(response_time) as p90 by url",
+        "mock_file": "D:\\Desktop 2024\\PycharmProjects\\RESTAPI\\ObserveabilitySample\\static\\mock_data\\iis_web_traffic_analysis.txt"
+    },
+    "IIS Error Logs Analysis": {
+        "query": "search index=error_logs status>=500 | stats count by status, url",
+        "mock_file": "D:\\Desktop 2024\\PycharmProjects\\RESTAPI\\ObserveabilitySample\\static\\mock_data\\iis_error_logs.txt"
+    },
+    "IIS Response Times Series Chart": {
+        "query": "search index=web_logs | timechart avg(response_time) by url span=5m",
+        "mock_file": "D:\\Desktop 2024\\PycharmProjects\\RESTAPI\\ObserveabilitySample\\static\\mock_data\\iis_time_series.txt"
+        
+    }
+}
+
+
+############ DUMMY LOG SECTION START #############
+
+LOG_MESSAGES = [
+    "User {user} logged in from IP {ip}",
+    "Failed login attempt for user {user} from IP {ip}",
+    "Transaction {transaction} completed successfully in {time} ms",
+    "Server {server} CPU usage at {usage}%",
+    "Memory usage alert on {server}: {usage}%",
+    "Error 500: Internal server error on {server}",
+    "Database query executed: {query}",
+    "User {user} logged out",
+    "New order placed by {user}, Order ID: {order_id}",
+    "Cache cleared on server {server}",
+    "Security Alert: Multiple failed logins detected for {user}",
+    "File upload successful: {filename} ({size}MB)",
+    "API request received: {endpoint}, Response time: {time}ms",
+    "Service {service} restarted on {server}",
+    "Email sent to {email} for order confirmation",
+]
+
+def generate_realistic_logs(servers, num_logs=50):
+    logs = []
+    for _ in range(num_logs):
+        log_template = random.choice(LOG_MESSAGES)
+        log_message = log_template.format(
+            user=f"user{random.randint(1, 100)}",
+            ip=f"192.168.1.{random.randint(1, 255)}",
+            transaction=random.choice(["Checkout", "Payment", "Login", "Search"]),
+            time=random.randint(100, 2000),
+            server=random.choice(servers) if servers else "Unknown Server",
+            usage=random.randint(50, 99),
+            query=f"SELECT * FROM users WHERE id={random.randint(1, 500)}",
+            order_id=random.randint(1000, 9999),
+            filename=f"report_{random.randint(1, 50)}.csv",
+            size=round(random.uniform(0.5, 10.0), 2),
+            endpoint=f"/api/{random.choice(['login', 'order', 'payment', 'profile'])}",
+            service=random.choice(["AuthService", "OrderService", "CacheService"]),
+            email=f"user{random.randint(1, 100)}@example.com"
+        )
+        logs.append({
+            "timestamp": (datetime.now() - timedelta(minutes=random.randint(1, 60))).strftime("%Y-%m-%d %H:%M:%S"),
+            "server": random.choice(servers) if servers else "Unknown",
+            "message": log_message
+        })
+    return logs
+
+############ DUMMY LOG SECTION END #############
+
+
+# Load Config
+base_dir = os.path.dirname(os.path.abspath(__file__))  # Get script's directory
+config_path = os.path.join(base_dir, "config.json")
+
+with open(config_path, "r") as config_file:
+    config = json.load(config_file)
+
+APPLICATIONS = list(config.get("applications", {}).keys())
+DT_ENVIRONMENT = config["dynatrace"]["environment"]
+DT_API_TOKEN = config["dynatrace"]["api_token"]
+HEADERS = {"Authorization": f"Api-Token {DT_API_TOKEN}", "Content-Type": "application/json"}
+
+
+# Extract Splunk details
+SPLUNK_HOST = config["splunk"]["host"]
+SPLUNK_PORT = config["splunk"]["port"]
+SPLUNK_USERNAME = config["splunk"]["username"]
+SPLUNK_PASSWORD = config["splunk"]["password"]
+SPLUNK_INDEX = config["splunk"]["index"]
+
+# Store application-specific Splunk queries
+APPLICATION_QUERIES = {
+    app: details.get("splunk_queries", []) for app, details in config["applications"].items()
+}
+
+###########SERVER CONFIGURATION#############
+CONFIG = {
+    "applications": {
+        "Mobile": ["Server1", "Server2"],
+        "App2": ["Server3", "Server4", "Server5", "Server6", "Server7", "Server8", "Server9"]
+    }
+}
+
+
+########## GRANULARITY MAPPING #############
+
+GRANULARITY_MAPPING = {
+    "1m": 1,    # Every 1 minute
+    "5m": 5,    # Every 5 minutes
+    "15m": 15,  # Every 15 minutes
+    "1h": 60    # Every 1 hour
+}
+
+######## CODE STARTS####################
+# Function to get Splunk queries for a given application
+def get_splunk_queries(application_name):
+    """Retrieve Splunk queries for a given application."""
+    return APPLICATION_QUERIES.get(application_name, [])
+
+
+####### SPLUNK CODE PART BEGINS #########################
+
+# Function to execute a real Splunk query
+def execute_splunk_query(query):
+    url = f"{SPLUNK_HOST}/services/search/jobs"
+    auth = (SPLUNK_USERNAME, SPLUNK_PASSWORD)
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    data = {
+        "search": f"search {query}",
+        "output_mode": "json",
+        "exec_mode": "blocking"
+    }
+
+    # Submit search job
+    response = requests.post(url, auth=auth, headers=headers, data=data, verify=False)
+    if response.status_code != 201:
+        return {"error": f"Failed to submit query: {response.text}"}
+
+    # Extract job ID
+    job_id = response.json()["sid"]
+
+    # Retrieve search results
+    results_url = f"{SPLUNK_HOST}/services/search/jobs/{job_id}/results?output_mode=json"
+    results_response = requests.get(results_url, auth=auth, verify=False)
+    if results_response.status_code != 200:
+        return {"error": f"Failed to fetch results: {results_response.text}"}
+
+    return results_response.json()["results"]
+
+# Function to read and process mock data
+
+def read_mock_data(file_path, start_time, end_time, granularity):
+    """
+    Reads a mock data file, processes multi-line error descriptions, 
+    and filters records based on the given time range (ignoring seconds).
+
+    Parameters:
+        file_path (str): Path to the mock data file.
+        start_time (datetime): Start of the time range for filtering.
+        end_time (datetime): End of the time range for filtering.
+        granularity (str): (Unused in this function, but kept for consistency).
+
+    Returns:
+        list: Filtered list of dictionaries containing processed mock data.
+    """
+
+    # Check if the file exists, return an error if not found
+    if not os.path.exists(file_path):
+        return {"error": f"Mock data file {file_path} not found"}
+
+    # Open the file and read all lines
+    with open(file_path, "r") as file:
+        lines = file.readlines()
+
+    # Ensure the file has at least a header and one data row
+    if len(lines) < 2:
+        return {"error": f"File {file_path} is empty or missing data"}
+
+    # List of possible timestamp column names (to handle variations)
+    TIMESTAMP_HEADERS = {"time", "time_stamp", "timestamp", "TIMESTAMP", "log_time", "logTime", "TimeStamp"}
+
+    # Extract the header row and split into column names
+    headers = lines[0].strip().split("\t")
+    # print(headers)
+
+    # Find the column that contains the timestamp
+    timestamp_col = next((col for col in headers if col in TIMESTAMP_HEADERS), None)
+
+    # If no valid timestamp column is found, return an error
+    if not timestamp_col:
+        return {"error": "No valid timestamp column found in mock data"}
+    
+    raw_data = []  # List to store processed data
+    current_entry = None  # Variable to handle multi-line entries
+
+    # Convert start and end times to ignore seconds (`%Y-%m-%d %H:%M`)
+    start_time_str = start_time.strftime("%Y-%m-%d %H:%M")
+    end_time_str = end_time.strftime("%Y-%m-%d %H:%M")
+
+    # Iterate over each line of the file, excluding the header
+    for line in lines[1:]:
+        
+        # Split the line into individual values based on tab delimiter
+        parts = line.strip().split("\t", maxsplit=len(headers) - 1)  # Preserve last column content
+        # print(len(parts), len(headers))
+        # print(line)
+        # If the number of parts matches the headers, it's a new row
+        if len(parts) == len(headers):
+            if current_entry:  # If there's an existing entry, save it before starting a new one
+                raw_data.append(current_entry)
+                
+
+            # Extract the timestamp value from the identified timestamp column
+            timestamp_str = parts[headers.index(timestamp_col)]  
+            try:
+                # Normalize timestamp format by keeping only up to minutes
+                timestamp_dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                try:
+                    timestamp_dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M")  # Handle timestamps without seconds
+                except ValueError:
+                    current_entry = None  # Skip the row if timestamp is invalid
+                    print('Error')
+                    continue
+            
+            # print("hddfdfdf")
+            # Convert timestamp to `YYYY-MM-DD HH:MM` format for comparison
+            timestamp_str_trimmed = timestamp_dt.strftime("%Y-%m-%d %H:%M")
+
+            # print(start_time_str,timestamp_str_trimmed, end_time_str)
+
+            # Filter based on the time range (ignoring seconds)
+            if start_time_str <= timestamp_str_trimmed <= end_time_str:
+                current_entry = dict(zip(headers, parts))  # Create a new entry
+            else:
+                current_entry = None  # Skip this row if it's out of the time range
+
+        else:  # If the row has fewer columns, treat it as a continuation of the previous row
+            if current_entry:
+                # Append the additional content to the "Error Description" field
+                current_entry["Error Description"] = current_entry.get("Error Description", "") + "\n" + line.strip()
+
+    # Ensure the last processed entry is added to the list
+    if current_entry:  
+        raw_data.append(current_entry)  
+
+    # print(raw_data)
+
+    return raw_data
+
+
+
+def format_datetime(timestamp):
+    """Convert 'YYYY-MM-DDTHH:MM' to 'YYYY-MM-DD HH:MM:SS'"""
+    try:
+        return datetime.strptime(timestamp, "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None  # Handle invalid format gracefully
+
+
+# API Endpoint to fetch data (mock or real)
+@app.route("/fetch_splunk_data", methods=["POST"])
+def fetch_splunk_data():
+
+    mode = request.args.get("mode", "mock")  # Default to mock mode. Change to "real" mode for Splunk live calls
+    granularity = request.json.get("granularity", "5m")  # Default granularity
+    app_name = request.json.get("application")
+
+    # Extract and format dates
+    start_time_str = request.json.get("start_date")
+    end_time_str = request.json.get("end_date")
+
+    # Format start date if provided, otherwise default to 24 hours ago
+    if start_time_str:
+        start_time_str = format_datetime(start_time_str)
+    else:
+        start_time_str = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Format end date if provided, otherwise default to current time
+    if end_time_str:
+        end_time_str = format_datetime(end_time_str)
+    else:
+        end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Validate date format to prevent errors
+    try:
+        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return jsonify({"error": "Invalid start_time or end_time format. Use YYYY-MM-DD HH:MM:SS"}), 400
+
+    # print(start_time)
+    # Dictionary to store results from data sources
+    results = {}
+    print("appName:" + app_name)
+    print(get_splunk_queries(app_name))
+    
+    for query in get_splunk_queries(app_name):
+
+        if mode == "real":
+            results[query["name"]] = execute_splunk_query(query["query"])
+        else:
+            print(query["mock_file"], start_time, end_time, granularity)
+            results[query["name"]] = read_mock_data(query["mock_file"], start_time, end_time, granularity)
+
+    # # Loop through each data source and fetch the relevant data
+    # for key, source in data_sources.items():
+    #     if mode == "real":
+    #          # Fetch real data from Splunk
+    #         results[key] = execute_splunk_query(source["query"])
+    #     else:
+    #         # results[key] = read_mock_data(source["mock_file"])
+    #         results[key] = read_mock_data(source["mock_file"], start_time, end_time, granularity)
+
+    # Return the results as a JSON response
+    # print(results)
+    return jsonify(results)
+
+####### SPLUNK CODE PART ENDS #########################
+
+###### SIMULATE HOST SERVER HEALTH HONEYCOMB DATA ############
+
+@app.route('/get_host_health', methods=['POST'])
+def get_host_health():
+    """ Simulating host health metrics dynamically based on selected servers """
+    request_data = request.get_json()
+    selected_servers = request_data.get("serverNames", [])  # Get selected servers
+    application_name = request_data.get("applicationName", "")
+
+    servers = ["Server1", "Server2", "Server3", "Server4", "Server5"]
+
+    # If no specific servers are selected, use all servers
+    if not selected_servers:
+        selected_servers = servers
+
+    health_data = []
+        
+    for server in servers:
+        cpu_usage = random.randint(10, 30)
+        memory_usage = random.randint(10, 95)
+        error_count = random.randint(0, 10)  # Simulating error occurrences
+        
+        # Determine server status based on CPU & errors
+        if cpu_usage > 85 or error_count > 5:
+            status = "Critical"  # 🔴 Red
+        elif memory_usage > 70 or error_count > 2:
+            status = "Warning"  # 🟠 Amber
+        else:
+            status = "Healthy"  # 🟢 Green
+        
+        health_data.append({
+            "server": server,
+            "cpu_usage": cpu_usage,
+            "memory_usage": memory_usage,
+            "error_count": error_count,
+            "status": status
+        })
+
+    summary = {
+        "cpu_avg": sum(d["cpu_usage"] for d in health_data) // len(health_data),
+        "memory_avg": sum(d["memory_usage"] for d in health_data) // len(health_data),
+        "total_errors": sum(d["error_count"] for d in health_data)
+    }
+    
+    return jsonify({"health_data": health_data, "summary": summary})
+
+############## HONEYCOMB SIMULATION ENDS ##################
+
+
+###########DYNATRACE PROGRAM STARTS HERE##################
+
+
+def get_hosts_by_management_zone(mz_name):
+    url = f"{DT_ENVIRONMENT}/api/v2/entities?entitySelector=type(\"HOST\"),mzName(\"{mz_name}\")"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        return {host["entityId"]: host["displayName"] for host in response.json().get("entities", [])}
+    return {}
+
+def get_metrics(entity_ids, metric_keys, start_time, end_time, granularity):
+    """Fetch CPU, Memory, and application-specific metrics from Dynatrace."""
+    entity_selector = ",".join(entity_ids)
+    # metric_selector = ",".join(metric_keys)
+
+    url = (f"{DT_ENVIRONMENT}/api/v2/metrics/query?"
+           f"metricSelector={metric_keys}&entitySelector=entityId(\"{entity_selector}\")"
+           f"&from={start_time}&to={end_time}")
+
+    # url = (f"{DT_ENVIRONMENT}/api/v2/metrics/query?"
+    #        f"metricSelector={metric_selector}&entitySelector=entityId(\"{entity_selector}\")"
+    #     )
+    
+    HEADERS = {"Authorization": f"Api-Token {DT_API_TOKEN}", "Accept": "text/csv"}
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        # print(response.text)
+
+        return response.text
+        # return response.json().get("result", [])
+    return []
+
+@app.route('/servers', methods=['GET'])
+def fetch_servers():
+    """Fetch servers for selected application."""
+    app_name = request.args.get("application")
+    # print(app_name)
+    
+    if not app_name or app_name not in config["applications"]:
+        return jsonify({"error": "Invalid application name"}), 400
+
+    mz_name = config["applications"][app_name]["management_zone"]
+
+    servers = get_hosts_by_management_zone(mz_name)
+    # print(servers)
+    return jsonify([{"id": entity_id, "name": name} for entity_id, name in servers.items()])
+
+
+# from flask import Flask, request, jsonify
+# import csv
+# import io
+# from datetime import datetime, timezone, timedelta
+
+# app = Flask(__name__)
+
+@app.route('/metrics', methods=['POST'])
+def fetch_metrics():
+    """Fetch metrics based on selected servers and time range."""
+
+    data = request.json
+    
+    app_name = data.get("application")
+    selected_servers = data.get("servers") or []
+    start_time = data.get("start_date") or "now-1h"
+    end_time = data.get("end_date") or "now"
+    granularity = data.get("granularity") or  "5m"
+    metric_ids = data.get("metric")
+
+    # print(start_time)
+    # print(data.get("metric"))
+
+    if not app_name or app_name not in config["applications"]:
+        return jsonify({"error": "Invalid application name"}), 400
+
+    mz_name = config["applications"][app_name]["management_zone"]
+    servers_dict = get_hosts_by_management_zone(mz_name)
+    
+    if not selected_servers:
+        selected_servers = list(servers_dict.keys())
+
+    metrics_data = get_metrics(selected_servers, metric_ids, start_time, end_time, granularity)
+
+    if not metrics_data:
+        return jsonify({"error": "No data received"}), 500
+
+    # Convert start and end time to datetime objects
+    def parse_time(time_str):
+        for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(time_str, fmt)
+            except ValueError:
+                pass
+        raise ValueError("Invalid date format")
+
+
+    # try:
+    #     start_dt = parse_time(start_time)
+    #     end_dt = parse_time(end_time)
+    #     print(end_dt)
+    # except ValueError:
+    #     return jsonify({"error": "Invalid date formatsssssx"}), 400
+
+    # time_difference = (end_dt - start_dt).days
+    # print("time:" + str(time_difference))
+    # Set up EST timezone
+    est_tz = timezone(timedelta(hours=-5))  # EST (UTC-5)
+
+    # Parse CSV response
+    csv_file = io.StringIO(metrics_data)
+    reader = csv.DictReader(csv_file)
+
+    output = {}
+
+    for row in reader:
+        # print(row)
+        metric_name = row.get("metricId", "Unknown")
+        server_id = row.get("dt.entity.host", "Unknown")
+        timestamp_ms = row.get("time")
+        # Convert timestamp to EST
+        try:
+            utc_time = datetime.strptime(timestamp_ms, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+            est_time = utc_time.astimezone(est_tz)
+            formatted_time = est_time.strftime("%H:%M") #if time_difference <= 1 else est_time.strftime("%Y-%m-%d %H:%M:%S")
+            
+        except (ValueError, TypeError):
+            formatted_time = "Invalid Timestamp"
+
+        # Handle value conversion
+        value_str = row.get("value", "0").strip()
+        value = float(value_str) if value_str.replace(".", "", 1).isdigit() else 0.0
+
+        server_name = servers_dict.get(server_id, "Unknown")
+
+        if metric_name not in output:
+            output[metric_name] = []
+
+        output[metric_name].append({
+            "timestamp": formatted_time,
+            "server": server_name,
+            "value": value
+        })
+
+    return output
+
+
+# @app.route('/metrics', methods=['POST'])
+# def fetch_metrics():
+#     """Fetch metrics based on selected servers and time range."""
+
+
+    
+#     data = request.json
+#     app_name = data.get("application")
+#     selected_servers = data.get("servers") or []
+#     start_time = data.get("start_date", "now-1h")
+#     end_time = data.get("end_date", "now")
+#     granularity = data.get("granularity", "5m")
+#     metric_ids = data.get("metric")
+#     # metric_ids = data.get("granularity", "5m")
+
+#     print(metric_ids)
+
+#     print(app_name,start_time,end_time)
+
+#     if not app_name or app_name not in config["applications"]:
+#         return jsonify({"error": "Invalid application name"}), 400
+
+#     mz_name = config["applications"][app_name]["management_zone"]
+    
+
+#     servers_dict = get_hosts_by_management_zone(mz_name)
+#     if not selected_servers:
+#         selected_servers = list(servers_dict.keys())
+
+#     # Get metrics based on application
+#     # app_metrics = config["default_metrics"] + config["applications"][app_name].get("metrics", [])
+#     #app_metrics = config["default_metrics"] + config["applications"].get(app_name, {}).get("metrics", [])
+#     #app_metrics = [{"id": "builtin:host.cpu.usage", "label": "CPU Usage"}]  # ✅ Now it's a list of dictionaries
+#     # cpu_usage=fetch_metrics(app_metrics)
+#     #metric_ids = [m["id"] for m in app_metrics]
+
+#     print(metric_ids)
+#     metrics_data = get_metrics(selected_servers, metric_ids, start_time, end_time, "5m")
+    
+#     if not metrics_data:
+#         return jsonify({"error": "No data received"}), 500
+    
+#     # Parse CSV response
+#     csv_file = io.StringIO(metrics_data)  # Convert string CSV to a file-like object
+#     reader = csv.DictReader(csv_file)  # Convert CSV rows into dictionaries
+
+#     output = {}
+#     # print("dfddddddddddddddddddddddd")
+
+#     # data = list(reader) 
+#     # print(data)
+    
+#     for row in reader:
+#         metric_name = row.get("metricId", "Unknown")
+#         server_id = row.get("dt.entity.host", "Unknown")
+#         timestamp_ms = row.get("time")
+#         # value = float(row.get("value", 0))
+#         # Check if 'value' is empty or invalid before converting
+#         value_str = row.get("value", "0").strip()  # Remove whitespace
+#         if value_str.replace(".", "", 1).isdigit():  # Check if it's a valid number
+#             value = float(value_str)
+#         else:
+#             value = 0.0  # Default or handle appropriately
+
+#         # Convert timestamps
+#         utc_time = row.get("time", 0) #datetime.utcfromtimestamp(timestamp_ms / 1000).replace(tzinfo=utc_tz)
+#         #est_time = utc_time.astimezone(est_tz).strftime('%Y-%m-%d %H:%M:%S')
+
+       
+#         server_name = servers_dict.get(server_id, "Unknown")
+
+#         if metric_name not in output:
+#             output[metric_name] = []
+
+#         output[metric_name].append({
+#             "timestamp": utc_time,
+#             "server": server_name,
+#             "value": value
+#         })
+
+#     # print(output)
+#     return output
+
+    # output = {metric["metricId"]: [] for metric in metrics_data}
+    # for metric in metrics_data:
+    #     metric_name = metric["metricId"]
+    #     for series in metric.get("data", []):
+    #         server_id = series["dimensions"][0]
+    #         server_name = servers_dict.get(server_id, "Unknown")
+    #         for ts, value in zip(series["timestamps"], series["values"]):
+    #             utc_time = datetime.utcfromtimestamp(ts / 1000).replace(tzinfo=utc_tz)
+    #             est_time = utc_time.astimezone(est_tz).strftime('%Y-%m-%d %H:%M:%S')
+
+    #             output[metric_name].append({
+    #                 "timestamp": est_time, #datetime.utcfromtimestamp(ts / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+    #                 "server": server_name,
+    #                 "value": value
+    #             })
+
+    # print(output)
+    # return output
+    # return jsonify(output)
+
+
+###########DYNATRACE PROGRAM ENDs HERE##################
+
+#####
+
+
+@app.route('/')
+def index():
+    # Extract applications dynamically
+    applications = list(config.get("applications", {}).keys())  # Extracts ['OOLB', 'Mobile']
+    
+    # Define test scenarios per application
+    test_scenarios = {
+        "OOLB": [
+            {"testID": "T001", "testScenarioName": "Login Test"},
+            {"testID": "T002", "testScenarioName": "Payment Test"}
+        ],
+        "Mobile": [
+            {"testID": "T101", "testScenarioName": "App Launch Test"},
+            {"testID": "T102", "testScenarioName": "Push Notification Test"}
+        ]
+    }
+
+    return render_template('dashboard.html', applications=applications, test_scenarios=test_scenarios)  # Pass applications
+
+
+# Mock transaction data for different test IDs
+transactions_data = {
+    "T001": ["Login Request", "Login Response"],
+    "T002": ["Payment Initiated", "Payment Success", "Payment Failure"],
+    "T101": ["App Start", "App Load", "App Crash"],
+    "T102": ["Notification Received", "Notification Clicked"]
+}
+
+@app.route('/get_transactions', methods=['POST'])
+def get_transactions():
+    test_id = request.form.get("test_id")  # Get test_id from request
+
+    if not test_id:
+        return jsonify({"error": "No test_id provided"}), 400  # Return error if no test_id
+
+    transactions = transactions_data.get(test_id, [])  # Get transactions for the test_id
+
+    return jsonify({"transactions": transactions})  # Return transactions as JSON
+
+@app.route('/index2')
+def index2():
+    return render_template('index2.html')
+
+
+#Filter the data based on the conditions passed from the UI Web
+
+@app.route('/get_data', methods=['POST'])
+def get_data():
+    filters = request.json
+    application = filters.get("application")
+    start_date = filters.get("start_date")
+    end_date = filters.get("end_date")
+    selected_servers = filters.get("servers", [])  # Get selected servers
+    granularity = filters.get("granularity", "5m")  # Default to 5 min
+    servers = CONFIG["applications"].get(application, [])
+
+    if not selected_servers:
+        selected_servers = servers
+    
+    # Convert string dates to datetime objects
+    # start_dt = datetime.strptime(start_date, "%Y-%m-%dT%H:%M") if start_date else datetime.now() - timedelta(hours=1)
+    # end_dt = datetime.strptime(end_date, "%Y-%m-%dT%H:%M") if end_date else datetime.now()
+    
+    start_dt = datetime.strptime(start_date, "%Y-%m-%dT%H:%M") if start_date else datetime.now() - timedelta(hours=1)
+    end_dt = datetime.strptime(end_date, "%Y-%m-%dT%H:%M") if end_date else datetime.now()
+
+    # Get the interval (in minutes)
+    interval = GRANULARITY_MAPPING.get(granularity, 5)
+
+    # Generate timestamps every 5 minutes
+    # timestamps = [(start_dt + timedelta(minutes=i)).strftime("%H:%M") for i in range(0, int((end_dt - start_dt).total_seconds() / 60), 5)]
+    timestamps = [(start_dt + timedelta(minutes=i)).strftime("%H:%M") for i in range(0, int((end_dt - start_dt).total_seconds() / 60), interval)]
+
+    transaction_types = [
+        "Login", "Search", "Checkout", "Add to Cart", "Remove from Cart", 
+        "Payment", "View Product", "Update Profile", "Logout", "Order History"
+    ]
+    
+    transactions = {}
+    transaction_summary = []
+
+    for transaction in transaction_types:
+        # print(transaction)
+        response_times = [round(random.uniform(0.5, 3.0), 2) for _ in timestamps]
+        # print(response_times)
+        tps_values = [random.randint(5, 20) for _ in timestamps]  # Random TPS per timestamp
+        
+        avg_response_time = round(sum(response_times) / len(response_times), 2)
+        avg_tps = round(sum(tps_values) / len(tps_values), 2)
+        
+        transactions[transaction] = {
+            "response_times": response_times,
+            "tps_values": tps_values
+        }
+        
+        transaction_summary.append({
+            "name": transaction,
+            "tps": avg_tps,
+            "avg_response_time": avg_response_time
+        })
+
+    status_codes = {"200": random.randint(100, 500), "400": random.randint(10, 50),"400": random.randint(10, 50),
+                    "401": random.randint(10, 50),
+                     "403": random.randint(10, 50),
+                      "502": random.randint(100, 500), "500": random.randint(5, 20)}
+
+    # cpu_usage = {s: [random.randint(10, 90) for _ in timestamps] for s in servers}
+    # memory_usage = {s: [random.randint(20, 80) for _ in timestamps] for s in servers}
+    # server_hits = {s: random.randint(50, 300) for s in servers}
+
+    # app_metrics = [{"id": "builtin:host.cpu.usage", "label": "CPU Usage"}]  # ✅ Now it's a list of dictionaries
+    # cpu_usage=fetch_metrics(app_metrics)
+    #config["default_metrics"] + config["applications"].get(application, {}).get("metrics", [])
+    
+    # cpu_usage = {s: [random.randint(10, 10) for _ in timestamps] for s in selected_servers}
+    memory_usage = {s: [random.randint(20, 20) for _ in timestamps] for s in selected_servers}
+    server_hits = {s: random.randint(50, 300) for s in selected_servers}
+
+
+    # logs = [{"timestamp": (datetime.now() - timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S"), 
+    #          "server": random.choice(servers), "message": "Sample log entry"} for i in range(50)]
+    
+    # logs = [{"timestamp": (datetime.now() - timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S"), 
+    #             "server": random.choice(selected_servers), "message": "Sample log entry"} for i in range(50) if selected_servers]
+
+    logs = generate_realistic_logs(selected_servers, num_logs=50)
+    
+    return jsonify({
+        "timestamps": timestamps,
+        "transactions": transactions,
+        "transaction_summary": transaction_summary,
+        "status_codes": status_codes,
+        # "cpu_usage": cpu_usage,
+        "server_hits": server_hits,
+        "memory_usage": memory_usage,
+        "logs": logs
+    })
+
+if __name__ == '__main__':
+    app.run(debug=True)

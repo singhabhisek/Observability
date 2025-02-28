@@ -1,0 +1,61 @@
+timestamp	Status	URL	Count	Error Message	Server	Error Description
+2025-02-25 16:15:34	504	/api/processPayment	178	Gateway Timeout	web-server-01	KeyError: Missing required field in request
+ConnectionError: Failed to reach the database
+Traceback (most recent call last):
+2025-02-25 01:50:50	504	/api/processPayment	194	Gateway Timeout	web-server-03	Traceback (most recent call last):
+  raise Exception('Unexpected failure')
+TimeoutError: The request took too long to process
+2025-02-25 14:02:35	500	/api/processPayment	175	Internal Server Error	web-server-03	ValueError: Invalid input received
+  raise Exception('Unexpected failure')
+TimeoutError: The request took too long to process
+2025-02-24 19:59:54	500	/api/externalRequest	187	Internal Server Error	web-server-01	Traceback (most recent call last):
+ConnectionError: Failed to reach the database
+TimeoutError: The request took too long to process
+2025-02-25 13:22:28	502	/api/getUserDetails	71	Bad Gateway	web-server-02	  raise Exception('Unexpected failure')
+  File '/app/server.py', line 45, in process_request
+KeyError: Missing required field in request
+2025-02-25 02:14:09	502	/api/processPayment	134	Bad Gateway	web-server-01	TimeoutError: The request took too long to process
+ValueError: Invalid input received
+  raise Exception('Unexpected failure')
+2025-02-25 09:03:24	503	/checkout	66	Service Unavailable	web-server-04	ConnectionError: Failed to reach the database
+  File '/app/server.py', line 45, in process_request
+TimeoutError: The request took too long to process
+2025-02-25 16:09:08	500	/api/externalRequest	66	Internal Server Error	web-server-04	  raise Exception('Unexpected failure')
+  File '/app/server.py', line 45, in process_request
+ConnectionError: Failed to reach the database
+2025-02-25 12:41:08	502	/api/getOrderDetails	85	Bad Gateway	web-server-03	TimeoutError: The request took too long to process
+  raise Exception('Unexpected failure')
+KeyError: Missing required field in request
+2025-02-25 10:22:11	504	/api/processPayment	88	Gateway Timeout	web-server-01	  raise Exception('Unexpected failure')
+Traceback (most recent call last):
+  File '/app/server.py', line 45, in process_request
+2025-02-26 13:05:15	504	/checkout	53	Gateway Timeout	web-server-03	ConnectionError: Failed to reach the database
+TimeoutError: The request took too long to process
+  File '/app/server.py', line 45, in process_request
+2025-02-26 12:22:49	500	/api/getOrderDetails	196	Internal Server Error	web-server-02	KeyError: Missing required field in request
+ConnectionError: Failed to reach the database
+TimeoutError: The request took too long to process
+2025-02-26 08:50:38	502	/api/processPayment	125	Bad Gateway	web-server-04	ValueError: Invalid input received
+  File '/app/server.py', line 45, in process_request
+KeyError: Missing required field in request
+2025-02-26 02:40:07	503	/api/getUserDetails	57	Service Unavailable	web-server-03	  File '/app/server.py', line 45, in process_request
+KeyError: Missing required field in request
+ValueError: Invalid input received
+2025-02-26 15:02:06	500	/api/externalRequest	168	Internal Server Error	web-server-04	TimeoutError: The request took too long to process
+ValueError: Invalid input received
+KeyError: Missing required field in request
+2025-02-25 17:19:01	504	/api/processOrder	143	Gateway Timeout	web-server-03	  raise Exception('Unexpected failure')
+  File '/app/server.py', line 45, in process_request
+TimeoutError: The request took too long to process
+2025-02-26 13:30:44	500	/api/getOrderDetails	185	Internal Server Error	web-server-01	ValueError: Invalid input received
+KeyError: Missing required field in request
+TimeoutError: The request took too long to process
+2025-02-25 23:09:47	503	/checkout	129	Service Unavailable	web-server-03	ValueError: Invalid input received
+  File '/app/server.py', line 45, in process_request
+ConnectionError: Failed to reach the database
+2025-02-25 23:50:16	502	/api/processOrder	76	Bad Gateway	web-server-02	Traceback (most recent call last):
+KeyError: Missing required field in request
+  raise Exception('Unexpected failure')
+2025-02-26 09:45:07	503	/api/processPayment	86	Service Unavailable	web-server-01	  raise Exception('Unexpected failure')
+ConnectionError: Failed to reach the database
+KeyError: Missing required field in request
