@@ -1,0 +1,69 @@
+import pyodbc
+
+# Database connection function
+def get_db_connection():
+    conn_str = r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=path\to\yourdatabase.mdb;'
+    return pyodbc.connect(conn_str)
+
+# Common function to execute a query and return results
+def execute_query(query, params=None, fetch_all=True):
+    """
+    Execute a database query and return results.
+
+    :param query: SQL query as a string
+    :param params: Tuple or list of query parameters (optional)
+    :param fetch_all: If True, fetches all rows; otherwise, fetches one row
+    :return: List of dictionaries representing result rows or a single row
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Execute query with or without parameters
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+
+        # Fetch results
+        columns = [column[0] for column in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()] if fetch_all else dict(zip(columns, cursor.fetchone()))
+
+        conn.close()
+        return results
+    except Exception as e:
+        return {"error": str(e)}
+
+
+
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+# Route to get distinct transactions
+@app.route('/get_transactions', methods=['GET'])
+def get_transactions():
+    query = "SELECT DISTINCT trxName FROM record"
+    results = execute_query(query)
+    return jsonify(results)
+
+# Route to fetch filtered data based on test_id and transactions
+@app.route('/get_filtered_data', methods=['POST'])
+def get_filtered_data():
+    data = request.json
+    test_id = data.get('test_id')
+    selected_trx = data.get('transactions')
+
+    if not selected_trx:
+        return jsonify({"error": "No transactions selected"})
+
+    # Construct query dynamically
+    placeholders = ', '.join(['?'] * len(selected_trx))
+    query = f"SELECT * FROM record WHERE testID = ? AND trxName IN ({placeholders})"
+    params = [test_id] + selected_trx
+
+    results = execute_query(query, params)
+    return jsonify(results)
+
+if __name__ == '__main__':
+    app.run(debug=True)
