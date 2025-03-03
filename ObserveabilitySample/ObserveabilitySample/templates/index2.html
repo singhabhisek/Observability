@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Dynatrace Metrics</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
+</head>
+<body>
+
+    <h2>📊 Dynatrace Server Metrics</h2>
+
+    <label for="appSelect">Application:</label>
+    <select id="appSelect">
+        <!-- {% for app in applications %} -->
+        <!-- <option value="{{ app }}">{{ app }}</option> -->
+        <!-- {% endfor %} -->
+        <option value="Select">Select</option>
+        <option value="Mobile">Mobile</option>
+    </select>
+
+    <label for="serverSelect">Servers:</label>
+    <select id="serverSelect" multiple="multiple"></select>
+
+    <button onclick="fetchMetrics()">Fetch Metrics</button>
+
+    <div id="charts"></div>
+
+    <script>
+        $('#serverSelect').select2({ placeholder: "Select Servers", allowClear: true });
+
+        $('#appSelect').change(function() {
+            let app = $(this).val();
+            fetchServers(app);
+            $('#charts').empty();
+        });
+
+        function fetchServers(app) {
+            $.getJSON(`/servers?application=${app}`, function(data) {
+                $('#serverSelect').empty().trigger("change");
+                data.forEach(server => {
+                    let newOption = new Option(server.name, server.id, false, false);
+                    $('#serverSelect').append(newOption);
+                });
+                $('#serverSelect').trigger("change");
+            });
+        }
+
+        async function fetchMetrics() {
+            let app = $('#appSelect').val();
+            let servers = $('#serverSelect').val() || [];
+            let response = await fetch('/metrics', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ application: app, servers: servers })
+            });
+
+            let data = await response.json();
+            $('#charts').empty();
+
+            Object.keys(data).forEach(metric => {
+                let canvas = `<canvas id="${metric}"></canvas>`;
+                $('#charts').append(canvas);
+
+                new Chart(document.getElementById(metric), {
+                    type: "line",
+                    data: { labels: data[metric].map(d => d.timestamp), datasets: [{ label: metric, data: data[metric].map(d => d.value), borderColor: "blue", fill: false }] }
+                });
+            });
+        }
+    </script>
+
+</body>
+</html>

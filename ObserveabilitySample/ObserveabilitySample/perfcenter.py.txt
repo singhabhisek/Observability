@@ -1,0 +1,158 @@
+import os
+import io
+import json
+import zipfile
+import requests
+import pyodbc
+from base64 import b64encode
+
+
+class PerfCenter:
+    """
+    This class provides methods to interact with MicroFocus Performance Center (LoadRunner Enterprise) via REST API.
+    It allows authentication, test execution, downloading test results, extracting analyzed results, 
+    and executing SQL queries on extracted `.mdb` database files.
+    """
+
+    def __init__(self, host, domain, project, fiddler=False):
+        """
+        Initializes the PerfCenter client with server details.
+        :param host: Performance Center server URL.
+        :param domain: The domain of the Performance Center.
+        :param project: The project name within the domain.
+        :param fiddler: Set to True if using Fiddler for debugging requests.
+        """
+        self.host = host
+        self.domain = domain
+        self.project = project
+        self.project_rest_api = f"{self.host}/LoadTest/rest/domains/{self.domain}/projects/{self.project}"
+        self.session = requests.Session()
+        
+        if fiddler:
+            self.session.proxies = {
+                'http': 'http://127.0.0.1:8888',
+                'https': 'http://127.0.0.1:8888',
+            }
+
+    def authenticate(self, login, password):
+        """
+        Authenticates the user and establishes a session.
+        :param login: Username for authentication.
+        :param password: Password for authentication.
+        :return: Response object from the authentication request.
+        """
+        self.auth_token = b64encode(f"{login}:{password}".encode("unicode_escape")).decode("utf-8")
+        self.auth_token = f"Basic {self.auth_token}"
+        self.session.headers.update(
+            {
+                'Authorization': self.auth_token,
+                'Accept': 'application/json',
+            }
+        )
+        return self.session.get(url=f'{self.host}/LoadTest/rest/authentication-point/authenticate')
+
+    def logout(self):
+        """
+        Logs out the user and ends the session.
+        :return: Response object from the logout request.
+        """
+        return self.session.get(url=f'{self.host}/LoadTest/rest/authentication-point/logout')
+
+    def get_test_run_status_extended(self, run_id):
+        """
+        Retrieves extended status details of a test run.
+        :param run_id: ID of the test run.
+        :return: Response object containing test run details.
+        """
+        return self.session.get(url=f'{self.project_rest_api}/Runs/{run_id}/Extended')
+
+    def get_test_results_metadata(self, run_id):
+        """
+        Retrieves metadata for test results.
+        :param run_id: ID of the test run.
+        :return: Response object containing test result details.
+        """
+        return self.session.get(url=f'{self.project_rest_api}/Runs/{run_id}/Results')
+
+    def download_lr_results(self, run_id, files, dst):
+        """
+        Downloads specific test result files from Performance Center.
+        :param run_id: ID of the test run.
+        :param files: List of filenames to download.
+        :param dst: Destination directory to save the downloaded files.
+        """
+        if not os.path.exists(dst):
+            os.mkdir(dst)
+
+        test_results = self.get_test_results_metadata(run_id=run_id).json()
+
+        for file in test_results:
+            if file['Name'] in files:
+                file_dir = 'lr_{}'.format(file['Type'].replace(' ', '_').lower())
+                if file_dir in os.listdir(dst):
+                    print(f'{file["Name"]} already exists in {dst}')
+                    continue
+
+                file_id = str(file['ID'])
+                req = self.session.get(url=f'{self.project_rest_api}/Runs/{run_id}/Results/{file_id}/data')
+
+                if req.ok:
+                    z = zipfile.ZipFile(io.BytesIO(req.content))
+                    z.extractall(f'{dst}/{file_dir}')
+                    print(f'{file["Name"]} successfully downloaded and extracted!')
+                else:
+                    print(f'Error downloading {file["Name"]}')
+
+    def extract_analyzed_results(self, run_id, test_run_path):
+        """
+        Extracts the analyzed results ZIP file into a specified directory.
+        :param run_id: ID of the test run.
+        :param test_run_path: Directory containing the downloaded test result files.
+        :return: Path where the results were extracted.
+        """
+        analyzed_zip = f"{test_run_path}/lr_results_{run_id}/Results_{run_id}.zip"
+
+        if not os.path.exists(analyzed_zip):
+            print(f"Analyzed results ZIP file not found: {analyzed_zip}")
+            return None
+
+        extract_path = f"{test_run_path}/AnalyzedResults"
+        os.makedirs(extract_path, exist_ok=True)
+
+        with zipfile.ZipFile(analyzed_zip, 'r') as zip_ref:
+            zip_ref.extractall(extract_path)
+
+        print(f"Extracted analyzed results to: {extract_path}")
+        return extract_path
+
+    def find_mdb_file(self, directory):
+        """
+        Searches for an `.mdb` file within a directory.
+        :param directory: The directory to search in.
+        :return: The full path of the `.mdb` file if found, else None.
+        """
+        for root, _, files in os.walk(directory):
+            for file in files:
+                if file.endswith(".mdb"):
+                    return os.path.join(root, file)
+        return None
+
+    def execute_mdb_query(self, mdb_file, query):
+        """
+        Executes a SQL query on the `.mdb` file and returns the results.
+        :param mdb_file: Path to the `.mdb` file.
+        :param query: SQL query to execute.
+        :return: Query result set.
+        """
+        conn_str = f'DRIVER={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={mdb_file};'
+        try:
+            conn = pyodbc.connect(conn_str)
+            cursor = conn.cursor()
+            cursor.execute(query)
+            results = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Error executing query: {e}")
+            return None

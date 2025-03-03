@@ -1,0 +1,50 @@
+import os
+from perfcenter import PerfCenter
+
+# Server and authentication details
+host = "HOST"
+domain = "COMPANY"
+project = "PROJECT"
+login = "tester"
+password = "tester"
+
+# Initialize and authenticate PerfCenter session
+wp_pc_client = PerfCenter(host=host, domain=domain, project=project)
+wp_pc_client.authenticate(login=login, password=password)
+
+# Define test run ID
+test_run_id = 2099
+
+# Define files to download (including analyzed results)
+files = {f'Results_{test_run_id}.zip'}  # Analyzed Result ZIP file
+
+# Get test run metadata (including start date)
+test_run_status = wp_pc_client.get_test_run_status_extended(run_id=test_run_id)
+test_run_date = test_run_status.json()['StartTime'].split(' ')[0]
+
+# Create directory for storing results
+test_run_dir = f'{test_run_date}_Run{test_run_id}'
+test_run_path = f'./{test_run_dir}'
+
+if not os.path.exists(test_run_path):
+    os.mkdir(test_run_path)
+
+# Download and extract analyzed results
+wp_pc_client.download_lr_results(run_id=test_run_id, files=files, dst=test_run_path)
+analyzed_results_path = wp_pc_client.extract_analyzed_results(test_run_id, test_run_path)
+
+# Locate the .mdb file and execute a query
+if analyzed_results_path:
+    mdb_file = wp_pc_client.find_mdb_file(analyzed_results_path)
+    if mdb_file:
+        query = "SELECT * FROM [your_table_name];"
+        results = wp_pc_client.execute_mdb_query(mdb_file, query)
+        for row in results:
+            print(row)  # Print each row of the result set
+    else:
+        print("No .mdb file found in the extracted results.")
+else:
+    print("Could not extract analyzed results.")
+
+# Logout from PerfCenter
+wp_pc_client.logout()
