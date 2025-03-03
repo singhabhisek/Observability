@@ -1,0 +1,98 @@
+import streamlit as st
+
+# Set page title
+st.set_page_config(page_title="Help Documentation", layout="wide")
+
+# Custom CSS for better styling
+st.markdown(
+    """
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .header {
+            background-color: #00274E;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 5px solid #00274E;
+            border-radius: 5px;
+        }
+        .section h2 {
+            color: #00274E;
+            border-bottom: 2px solid #00274E;
+            padding-bottom: 5px;
+        }
+        ul {
+            margin-left: 20px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# Header
+st.markdown('<div class="header">📜 Script Automation & Migration Tool - Help Documentation</div>', unsafe_allow_html=True)
+
+# Sidebar Navigation
+with st.sidebar:
+    st.title("Navigation")
+    page = st.radio("Go to", ["Home", "Fiddler to JMeter", "HAR to JMeter", "Postman to JMeter",
+                               "Postman to LoadRunner", "Settings", "Upload Process"])
+
+# Help Sections
+st.markdown('<div class="section">', unsafe_allow_html=True)
+st.header("🔹 Overview")
+st.write("""
+The **Script Automation & Migration Tool** simplifies the process of converting and migrating performance testing scripts across different tools such as **LoadRunner, JMeter, and Postman**.
+""")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section">', unsafe_allow_html=True)
+st.header("🔹 Key Features")
+st.markdown("""
+- Convert **Fiddler** sessions to JMeter format.
+- Migrate **HAR** files to JMeter.
+- Transform **Postman** collections into JMeter and LoadRunner scripts.
+- Upload and process test scripts with ease.
+- Manage tool settings for custom configurations.
+""")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section">', unsafe_allow_html=True)
+st.header("🔹 Navigation")
+st.write("Use the sidebar to navigate through different functionalities:")
+st.markdown("""
+- 🏠 **Home** - Overview of the tool.
+- 🔄 **Fiddler to JMeter** - Convert Fiddler logs into JMeter scripts.
+- 📂 **HAR to JMeter** - Process HAR files for JMeter testing.
+- 📜 **Postman to JMeter** - Convert Postman collections into JMeter-compatible scripts.
+- 🔁 **Postman to LoadRunner** - Migrate Postman collections into LoadRunner.
+- ⚙ **Settings** - Configure preferences.
+- 📤 **Upload Process** - Upload test scripts for processing.
+""")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section">', unsafe_allow_html=True)
+st.header("🔹 How to Use")
+st.write("""
+1️⃣ Select the script type from the sidebar.  
+2️⃣ Upload the required file (**HAR, Postman collection, etc.**).  
+3️⃣ Click **Process** to convert the file into the selected script format.  
+4️⃣ Download the converted script for use in **LoadRunner or JMeter**.  
+""")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section">', unsafe_allow_html=True)
+st.header("🔹 Support")
+st.write("For any queries or issues, contact the support team at: **support@example.com**.")
+st.markdown('</div>', unsafe_allow_html=True)
