@@ -1,0 +1,76 @@
+import streamlit as st
+import plotly.express as px
+import pandas as pd
+import random
+
+# Generate Dummy Data
+data = [
+    {"timestamp": f"2025-03-03 12:{i:02d}", "response_time": random.randint(100, 500),
+     "cpu_usage": random.uniform(10, 90), "memory_usage": random.uniform(30, 80),
+     "status_code": random.choice([200, 400, 500]), "application": random.choice(["Desktop", "Mobile"]),
+     "transaction": random.choice(["Login", "Checkout", "Add to Cart", "Logout"])}
+    for i in range(60)
+]
+df = pd.DataFrame(data)
+
+# Streamlit App
+st.set_page_config(layout="wide", page_title="Observability Dashboard")
+
+st.title("Observability Dashboard")
+
+# Filters
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    app_filter = st.selectbox("Select Application", ["All"] + list(df["application"].unique()))
+with col2:
+    status_filter = st.selectbox("Select Status Code", ["All"] + list(df["status_code"].unique()))
+with col3:
+    start_date = st.date_input("From Date")
+with col4:
+    end_date = st.date_input("To Date")
+
+st.button("Search")
+
+# KPI Metrics
+col1, col2, col3 = st.columns(3)
+col1.metric("Avg CPU Utilization", f"{df['cpu_usage'].mean():.2f}%")
+col2.metric("Avg Memory Utilization", f"{df['memory_usage'].mean():.2f}%")
+col3.metric("Total Errors", f"{(df['status_code'] != 200).sum()}")
+
+# Charts Section
+col1, col2, col3 = st.columns(3)
+
+# HTTP Status Code Pie Chart
+fig_pie = px.pie(df, names='status_code', title="HTTP Status Codes")
+col1.plotly_chart(fig_pie, use_container_width=True)
+
+# Server Hits Pie Chart
+fig_server = px.pie(df, names='application', title="Server Hits", hole=0.4)
+col2.plotly_chart(fig_server, use_container_width=True)
+
+# CPU Usage Line Chart
+fig_cpu = px.bar(df, x='timestamp', y='cpu_usage', title="CPU Usage")
+col3.plotly_chart(fig_cpu, use_container_width=True)
+
+# Lower Charts
+col1, col2, col3 = st.columns(3)
+
+# Transaction Response Time Line Chart
+fig_response = px.line(df, x='timestamp', y='response_time', title="Transaction Response Time")
+col1.plotly_chart(fig_response, use_container_width=True)
+
+# TPS Over Time Line Chart
+fig_tps = px.line(df, x='timestamp', y='response_time', color='transaction', title="TPS Over Time")
+col2.plotly_chart(fig_tps, use_container_width=True)
+
+# Memory Usage Chart
+fig_memory = px.line(df, x='timestamp', y='memory_usage', title="Memory Usage")
+col3.plotly_chart(fig_memory, use_container_width=True)
+
+# Transactions Table
+st.subheader("Transactions")
+st.dataframe(df[['transaction', 'response_time']])
+
+# Logs Table
+st.subheader("Logs")
+st.dataframe(df[['timestamp', 'application', 'status_code']])
