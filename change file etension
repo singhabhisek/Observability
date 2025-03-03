@@ -1,0 +1,26 @@
+import os
+
+def add_txt_to_files(directory):
+    for filename in os.listdir(directory):
+        old_path = os.path.join(directory, filename)
+        if os.path.isfile(old_path):  # Ensure it's a file, not a directory
+            new_filename = filename + ".txt" if not filename.endswith(".txt") else filename
+            new_path = os.path.join(directory, new_filename)
+            os.rename(old_path, new_path)
+            print(f'Renamed: {filename} -> {new_filename}')
+
+def remove_txt_from_files(directory):
+    for filename in os.listdir(directory):
+        old_path = os.path.join(directory, filename)
+        if os.path.isfile(old_path) and filename.endswith(".txt"):
+            new_filename = filename[:-4]  # Remove last 4 characters (.txt)
+            new_path = os.path.join(directory, new_filename)
+            os.rename(old_path, new_path)
+            print(f'Renamed: {filename} -> {new_filename}')
+
+# Set the directory where you want to add/remove .txt from each file
+directory_path = "D:\\Desktop 2024\\PycharmProjects\\RESTAPI\\ObserveabilitySample\\static"  # Change this to your actual directory
+
+# Example usage:
+add_txt_to_files(directory_path)
+# remove_txt_from_files(directory_path)
