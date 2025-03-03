@@ -1,5 +1,69 @@
 import streamlit as st
 import plotly.express as px
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+
+# Dynatrace API Configuration
+DT_API_TOKEN = "YOUR_DYNATRACE_API_TOKEN"
+DT_ENVIRONMENT_ID = "YOUR_ENVIRONMENT_ID"
+BASE_URL = f"https://{DT_ENVIRONMENT_ID}.live.dynatrace.com/api/v2"
+
+# Function to fetch CPU & Memory usage
+def fetch_dynatrace_metrics():
+    headers = {
+        "Authorization": f"Api-Token {DT_API_TOKEN}"
+    }
+    
+    # Dynatrace Metric API Query
+    metrics_query = "builtin:host.cpu.usage,builtin:host.mem.usage"
+    time_from = (datetime.utcnow() - timedelta(minutes=60)).isoformat() + "Z"
+    time_to = datetime.utcnow().isoformat() + "Z"
+    
+    url = f"{BASE_URL}/metrics/query?metricSelector={metrics_query}&from={time_from}&to={time_to}&resolution=1m"
+    
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        data = response.json()
+        return data["result"]
+    else:
+        st.error(f"Failed to fetch data: {response.text}")
+        return None
+
+# Streamlit UI
+st.title("Dynatrace Observability Dashboard")
+
+# Fetch Data
+data = fetch_dynatrace_metrics()
+
+if data:
+    # Transform data into DataFrame
+    metrics_data = []
+    for metric in data:
+        metric_name = metric["metricId"]
+        for series in metric["data"]:
+            for point in series["values"]:
+                metrics_data.append({
+                    "timestamp": datetime.utcfromtimestamp(point["timestamp"] / 1000).strftime("%Y-%m-%d %H:%M:%S"),
+                    "metric": metric_name,
+                    "value": point["value"]
+                })
+    
+    df = pd.DataFrame(metrics_data)
+
+    # Line Chart for CPU & Memory Usage
+    fig = px.line(df, x="timestamp", y="value", color="metric", title="CPU & Memory Usage Over Time")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Show Data Table
+    st.subheader("Raw Metrics Data")
+    st.dataframe(df)
+
+
+
+import streamlit as st
+import plotly.express as px
 import pandas as pd
 import random
 
