@@ -1,0 +1,48 @@
+{
+  "dynatrace": {
+      "environment": "https://iij82061.live.dynatrace.com",
+      "api_token": "dt0c01.ZTUWASSBSSYZFXNNX4W5NHP2.RDPYFREUA3YNGR723IJCF2ICJ5WLRPJIG3MAZHU2ES4ED5LS62VWPEHLDEHWDHKZ"
+  },
+  "splunk": {
+      "host": "splunk_host",
+      "port": 8089,
+      "username": "splunk_user",
+      "password": "splunk_password",
+      "index": "main_index"
+  },
+  "default_metrics": [
+      { "id": "builtin:host.cpu.usage", "label": "CPU Usage" },
+      { "id": "builtin:host.mem.usage", "label": "Memory Usage" }
+  ],
+  "applications": {
+      "OOLB": {
+          "management_zone": "OOLB_Zone",
+          "metrics": [
+              { "id": "builtin:jvm.gc.suspensionTime", "label": "Garbage Collection" },
+              { "id": "builtin:service.errors.totalRate", "label": "Error Rate" }
+          ],
+          "splunk_queries": [
+              {
+                  "name": "IIS Web Traffic Analysis",
+                  "query": "search index=web_logs | stats count, avg(response_time) as avg_time, perc90(response_time) as p90 by url",
+                  "mock_file": "D:\\Desktop 2024\\PycharmProjects\\RESTAPI\\Demo\\static\\mock_data\\iis_web_traffic_analysis.txt"
+              },
+              {
+                  "name": "IIS Error Logs Analysis",
+                  "query": "search index=error_logs status>=500 | stats count by status, url",
+                  "mock_file": "D:\\Desktop 2024\\PycharmProjects\\RESTAPI\\Demo\\static\\mock_data\\iis_error_logs.txt"
+              }
+          ]
+      },
+      "Mobile": {
+          "management_zone": "Production-1",
+          "splunk_queries": [
+              {
+                  "name": "IIS Response Times Series Chart",
+                  "query": "search index=web_logs | timechart avg(response_time) by url span=5m",
+                  "mock_file": "D:\\Desktop 2024\\PycharmProjects\\RESTAPI\\Demo\\static\\mock_data\\iis_time_series.txt"
+              }
+          ]
+      }
+  }
+}
