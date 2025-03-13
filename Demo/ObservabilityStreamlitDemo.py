@@ -1,6 +1,9 @@
 from io import StringIO
+import requests
 import streamlit as st
 import pandas as pd
+import numpy as np
+
 import json
 import os
 import random
@@ -9,6 +12,7 @@ from datetime import datetime, time, timedelta
 import time
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 from splunk_client import SplunkAPI
+
 from dynatrace_client import Dynatrace  # Import the Dynatrace client from a separate file
 
 # from streamlit_date_picker import date_range_picker, date_picker, PickerType
@@ -47,6 +51,9 @@ SPLUNK_INDEX = config["splunk"]["index"]
 # Initialize session state
 if "fetch_data_clicked" not in st.session_state:
     st.session_state.fetch_data_clicked = False
+
+# Initialize df_pivot as an empty DataFrame to prevent NameError
+df_pivot = pd.DataFrame()
 
 test_scenarios = {
     "OOLB": [
@@ -96,18 +103,81 @@ def fetch_transactions_for_test(test_id):
     return transaction_data.get(test_id, [])  # Replace with actual DB query
 
 
+# Generate dummy transaction data
+def generate_transaction_data_lr():
+    transactions = []
+    for i in range(10):
+        transactions.append({
+            "Transaction Name": f"Transaction {i+1}",
+            "Average Response Time (s)": round(random.uniform(1.0, 5.0), 2),
+            "90th Percentile Response Time (s)": round(random.uniform(1.5, 6.0), 2),
+            "Pass Count": random.randint(100, 500),
+            "Fail Count": random.randint(0, 10)
+        })
+    return pd.DataFrame(transactions)
+
+#Adjust for max Y-axis
+
+def get_y_axis_limit(y_max):
+    """
+    Dynamically calculates the upper limit for the Y-axis.
+    - For percentages: scale to 50% or 100%
+    - For numeric values: add 5 extra intervals
+    """
+    if y_max <= 1:  
+        return 1.0  # Scale to 100% (1.0)
+
+    if y_max <= 50:  
+        return 100  # Scale to 100% if under 50%
+
+    if y_max <= 100:  
+        return 100  # Keep at 100% if it's a percentage
+
+    # Find the nearest rounded interval (e.g., 5000 for 25000)
+    # magnitude = 10 ** (len(str(int(y_max))) - 1) if y_max > 0 else 10  # Example: 25000 → 10000
+    # interval = max(magnitude // 2, 1000)  # Ensure a reasonable interval
+
+    # Round up to the next multiple of the interval
+    #new_limit = ((y_max // interval) + 1) * interval
+    return y_max
+
+# Generate Dummy Data for LoadRunner graphs - this needs to be done with real data
+lr_data = [
+    {"timestamp": f"2025-03-03 12:{i:02d}", "response_time": random.randint(100, 500),
+    "status_code": random.choice([200, 400, 500]), "application": random.choice(["Desktop", "Mobile"]),
+    "transaction": random.choice(["Login", "Checkout", "Add to Cart", "Logout"])}
+    for i in range(60)
+]
+df_lr = pd.DataFrame(lr_data)
+
 
 # Function to fetch and process data
-def fetch_and_process_data(metric_ids, start_time, end_time):
-    selected_servers = "HOST-000553947E276A2C"
+def fetch_and_process_data(metric_ids, start_time, end_time, granularity):
+    print(metric_ids)
+    # selected_servers = "HOST-000553947E276A2C"
     
     # Get metrics data in CSV format
-    metrics_data = dt_client.get_metrics(
-        selected_servers, metric_ids, start_time, end_time, granularity, response_format="csv"
-    )
+    # metrics_data = dt_client.get_metrics(
+    #     selected_servers, metric_ids, start_time, end_time, granularity, response_format="csv"
+    # )
+
+    # Define the API endpoint
+    base_url = "http://127.0.0.1:5000/metrics"  # Update if running on a different host
+    
+    # Set query parameters
+    params = {
+        "metricId": metric_ids,
+        "from": start_time,
+        "now": end_time,
+        "granularity": granularity
+    }
+
+    # Send a GET request
+    metrics_data = requests.get(base_url, params=params)
+    # print (metrics_data.text)
 
     # Read CSV with proper headers
-    df = pd.read_csv(StringIO(metrics_data), header=0)
+    df = pd.read_csv(StringIO(metrics_data.text), header=0)
 
     # Ensure expected columns exist
     expected_columns = ["metricId", "dt.entity.host", "time", "value"]
@@ -135,32 +205,6 @@ def fetch_and_process_data(metric_ids, start_time, end_time):
 
     return df_pivot
 
-# Simulated API response (CSV format)
-csv_data = """metricId,dt.entity.host,time,value
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:45:00,6.48
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:46:00,9.74
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:47:00,8.41
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:48:00,9.71
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:49:00,10.68
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:50:00,7.85
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:51:00,7.24
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:52:00,7.81
-builtin:host.cpu.usage,HOST-000553947E276A2C,2025-03-10 10:53:00,11.13
-builtin:host.cpu.usage,HOST-123456789ABCDEF,2025-03-10 10:45:00,6.48
-builtin:host.cpu.usage,HOST-123456789ABCDEF,2025-03-10 10:46:00,6.20
-builtin:host.cpu.usage,HOST-123456789ABCDEF,2025-03-10 10:47:00,7.55
-builtin:host.cpu.usage,HOST-123456789ABCDEF,2025-03-10 10:48:00,8.30
-builtin:host.cpu.usage,HOST-123456789ABCDEF,2025-03-10 10:49:00,7.85
-builtin:host.cpu.usage,HOST-123456789ABCDEF,2025-03-10 10:50:00,9.20
-"""
-
-# Load CSV into Pandas DataFrame
-df_dt = pd.read_csv(StringIO(csv_data))
-
-# Convert time column to datetime
-df_dt["time"] = pd.to_datetime(df_dt["time"])
-
-
 
 # Fetch all Test Set IDs
 test_ids = fetch_all_test_ids()
@@ -171,19 +215,12 @@ test_details_map = {test_id: fetch_test_details(test_id).get("testScenarioName",
 # Generate dropdown options (Display: "ID - Scenario Name", Value: "ID")
 test_options = {f"{test_id} - {scenario}": test_id for test_id, scenario in test_details_map.items()}
 
+server_options = []
 
-# Generate dummy transaction data
-def generate_transaction_data_lr():
-    transactions = []
-    for i in range(10):
-        transactions.append({
-            "Transaction Name": f"Transaction {i+1}",
-            "Average Response Time (s)": round(random.uniform(1.0, 5.0), 2),
-            "90th Percentile Response Time (s)": round(random.uniform(1.5, 6.0), 2),
-            "Pass Count": random.randint(100, 500),
-            "Fail Count": random.randint(0, 10)
-        })
-    return pd.DataFrame(transactions)
+server_options_mock_dict = {
+    "HOST-000553947E276A2C": "Server A",
+    "HOST-123456789ABCDEF": "Server B"
+}
 
 # Page Configuration
 st.set_page_config(layout="wide")
@@ -205,6 +242,35 @@ applications_server = {
 }
 
 
+# Function to get user-friendly name
+def get_friendly_server_name(host_id):
+    """Returns a user-friendly server name using dropdown mapping or REST API fallback."""
+    print('host' + host_id)
+    print(servers_dict)
+    if host_id in servers_dict:
+        return servers_dict[host_id]
+    
+    # REST API call to fetch the server name if not found
+    response = requests.get(f"http://127.0.0.1:5000/get_server_name?host={host_id}")
+    if response.status_code == 200:
+        return response.json().get("friendly_name", host_id)
+    
+    return host_id  # Default fallback to original ID
+
+def format_datetime_custom(dt, iso_format=False):
+    """
+    Formats datetime object to Dynatrace API-compatible string.
+    
+    Args:
+        dt (datetime): The datetime object.
+        iso_format (bool): If True, includes milliseconds and timezone offset.
+    
+    Returns:
+        str: Formatted datetime string.
+    """
+    if iso_format:
+        return dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
+    return dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 def format_datetime(timestamp):
     """Ensure the timestamp is converted to 'YYYY-MM-DD HH:MM' format."""
@@ -251,54 +317,11 @@ def fetch_splunk_data(application, start_date, end_date, granularity, mode="mock
 
 #############DUMMY ANALYSIS###############################
 
-# Function to generate dummy transaction data
-def generate_transaction_data():
-    return pd.DataFrame({
-        "Time": pd.date_range(start="2024-03-01", periods=50, freq="T"),  # Time-based data
-        "CPU Server1": [random.uniform(30, 95) for _ in range(50)], 
-        "Memory Server1": [random.uniform(80, 98) for _ in range(50)],
-        "CPU Server2": [random.uniform(20, 90) for _ in range(50)],
-        "Memory Server2": [random.uniform(30, 95) for _ in range(50)]
-    })
 
-
-# Generate Data
-df = generate_transaction_data()
-
-# Function to analyze high CPU/Memory utilization
-def analyze_data(df):
-    analysis = []
-    
-    for col in df.columns:
-        if "CPU" in col or "Memory" in col:
-            high_utilization = df[df[col] > 80]  # Filter where utilization > 80%
-            high_count = len(high_utilization)
-            avg_utilization = df[col].mean()
-            
-            if high_count > 0:
-                duration = (high_utilization["Time"].max() - high_utilization["Time"].min()).seconds / 60
-                analysis.append(f"🔴 **{col} exceeded 80% utilization {high_count} times.** Total duration: {duration:.2f} min.")
-            
-            analysis.append(f"⚡ **Average {col} utilization:** {avg_utilization:.2f}%")
-    
-    if not analysis:
-        analysis.append("✅ No anomalies detected in CPU or Memory utilization.")
-    
-    return analysis
-
-
-
-with col3:
-    st.header("📝 Observations")
-    
-    # Perform Analysis
-    analysis_results = analyze_data(df)
-    # Convert list of observations to a formatted string
-    observations_text = "\n".join(f"- {result}" for result in analysis_results)
-
-    # for result in analysis_results:
-    #     st.markdown(f"- {result}")  # Display as bullet points
-    st.text_area("Here are our observations:", value=observations_text, height=600, disabled=False)
+# with col3:
+#     st.header("📝 Observations")
+#     # Perform Analysis
+#     st.text_area("Here are our observations:", value="we will show analyzed data here", height=600, disabled=False)
 
 
 
@@ -321,15 +344,9 @@ with col2:
         for scenario in test_scenarios.get(app_name, [])
     }
 
-
-    # server_options = applications_server.get(app_name, [])
-
-    # replace the above line with this logic for Dynatrace
         
     # Fetch the management zone name for the given application from the config file
-
     mz_name = config.get("applications", {}).get(app_name, {}).get("management_zone", "")
-
 
     # If no management zone is found, return an empty list
     if not mz_name:
@@ -405,7 +422,7 @@ with col2:
 
     server_name = col_filter7.multiselect("Server Name", options=server_options, key="server_name_dropdown")
     
-    col_space ,col_button1, col_button2, col_space = st.columns([2,1,1,2])
+    col_space ,col_button1, col_button2,  col_button3,  col_space = st.columns([2,1,1,1, 2])
     with col_button1:
         if st.button("Fetch Data"):
             st.session_state.fetch_data_clicked = True
@@ -417,176 +434,315 @@ with col2:
     with col_button2:
         if st.button("Reset Filters"):
             st.session_state.fetch_data_clicked = False
+
+    
+    with col_button3:
+        if st.button("Save Snapshot"):
+            st.session_state.fetch_data_clicked = False
     
 
     
     # Only fetch and display data if the button was clicked
+
     if st.session_state.fetch_data_clicked:
         # KPI Metrics Section
         st.subheader("📈 Performance Overview")
+
+        # Create three columns to display key performance indicators (KPIs)
         col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
         col_kpi1.metric("Average CPU Utilization", "45%")
         col_kpi2.metric("Average Memory Utilization", "60%")
         col_kpi3.metric("Total Errors", "12")
-        
-        # Generate CPU, Memory, and GC data
+
+        # Generate a time series for plotting data
         time_series = pd.date_range(start=start_date, end=end_date, freq="1H")
-        
+
+        # Get the list of servers for the selected application
         selected_servers = applications_server.get(app_name, [])
 
-        # Generate Dummy Data
-        lr_data = [
-            {"timestamp": f"2025-03-03 12:{i:02d}", "response_time": random.randint(100, 500),
-            "status_code": random.choice([200, 400, 500]), "application": random.choice(["Desktop", "Mobile"]),
-            "transaction": random.choice(["Login", "Checkout", "Add to Cart", "Logout"])}
-            for i in range(60)
-        ]
-        df_lr = pd.DataFrame(lr_data)
+        # Dynatrace Metrics Section
+        st.subheader("📊 Dynatrace Metrics")
 
-        data = {"Time": time_series}
-        for server in selected_servers:
-            data[f"CPU {server}"] = [random.uniform(20, 80) for _ in time_series]
-            data[f"Memory {server}"] = [random.uniform(40, 90) for _ in time_series]
-            data[f"GC {server}"] = [random.uniform(1, 10) for _ in time_series]
+        # Load default metrics and application-specific metrics from configuration
+        default_metrics = config.get("default_metrics", [])
+        application_metrics = config.get("applications", {}).get(app_name, {}).get("metrics", [])
 
-        df = pd.DataFrame(data)
+        # Combine both metric lists into a single list
+        metric_ids = [metric["id"] for metric in default_metrics + application_metrics]
+        metric_labels = {metric["id"]: metric["label"] for metric in default_metrics + application_metrics}
 
-        st.write(server_name)
-        if server_name:
+        # Fetch and process metric data
+        df_list = []  # List to store dataframes
+        valid_metric_ids = []  # Track valid metrics
+
+        for metric_id in metric_ids:
+            # Fetch data for each metric separately
+            df = fetch_and_process_data([metric_id], format_datetime_custom(start_date), format_datetime_custom(end_date), granularity)
+
+            if not df.empty:  # If data exists, add it to the list
+                df_list.append(df)
+                valid_metric_ids.append(metric_id)  # Track valid metric
+            else:
+                # Create an empty DataFrame as a placeholder for missing data
+                df_empty = pd.DataFrame({"time": pd.date_range(start=start_date, end=end_date, freq="5min")})
+                df_empty[metric_id] = None  # Fill metric column with NaN (ensures blank graph)
+                df_list.append(df_empty)
+                valid_metric_ids.append(metric_id)  # Still track the metric for plotting
+
+        # Ensure there's at least one valid dataframe before merging
+        if df_list:
+            # Merge all dataframes on the "time" column, ensuring proper alignment
+            df_pivot = pd.concat(df_list, axis=1).reset_index()
+
+            # Drop extra "index" column if present
+            if "index" in df_pivot.columns:
+                df_pivot = df_pivot.drop(columns=["index"])
+
+            # Drop duplicate "time" columns, keeping only one
+            df_pivot = df_pivot.loc[:, ~df_pivot.columns.duplicated()]
+
+            # Ensure 'time' is in datetime format
+            df_pivot["time"] = pd.to_datetime(df_pivot["time"], errors="coerce")
+
+            # Create a two-column layout for displaying plots
+            col1, col2 = st.columns(2)
+
+            # st.write("### Debug: Dataset Used for Analysis & Plotting")
+            # st.dataframe(df_pivot)
             
-            cpu_columns = [f"CPU {s}" for s in server_name]
-            memory_columns = [f"Memory {s}" for s in server_name]
-            gc_columns = [f"GC {s}" for s in server_name]
-            
+            # Loop through each valid metric and generate plots
+            for i, metric_id in enumerate(valid_metric_ids):  
+                # Find all matching columns (i.e., metrics recorded for different servers)
+                matching_columns = [col for col in df_pivot.columns if metric_id in col]
 
-            # Create CPU Usage Graph
-            if cpu_columns:
-                fig_cpu = px.line(df, x="Time", y=cpu_columns, 
-                                title="CPU Usage Over Time", labels={"value": "CPU Usage (%)", "variable": "Server"},
-                                template="plotly_dark")
-                fig_cpu.update_layout(xaxis_title="Time", yaxis_title="CPU Usage (%)", hovermode="x unified")
+                if matching_columns:
+                    # Extract server names from column names
+                    server_names = {col: get_friendly_server_name(col.split(" | ")[-1]) for col in matching_columns}
 
-            # Create Memory Usage Graph
-            if memory_columns:
-                fig_memory = px.line(df, x="Time", y=memory_columns, 
-                                    title="Memory Usage Over Time", labels={"value": "Memory Usage (%)", "variable": "Server"},
-                                    template="plotly_dark")
-                fig_memory.update_layout(xaxis_title="Time", yaxis_title="Memory Usage (%)", hovermode="x unified")
+                    # Rename columns to display only server names
+                    df_display = df_pivot.rename(columns=server_names)
 
-            # Create Garbage Collection Graph
-            if gc_columns:
-                fig_gc = px.line(df, x="Time", y=gc_columns, 
-                                title="Garbage Collection Over Time", labels={"value": "GC Events", "variable": "Server"},
-                                template="plotly_dark")
-                fig_gc.update_layout(xaxis_title="Time", yaxis_title="GC Events", hovermode="x unified")
+                    # Determine the maximum Y value in the dataset
+                    y_max = df_display[list(server_names.values())].max().max()
 
+                    # Calculate the total time range in hours
+                    time_range_hours = (df_display["time"].max() - df_display["time"].min()).total_seconds() / 3600
+
+                    # Dynamically set the tick interval based on the time range
+                    if time_range_hours <= 6:
+                        tick_interval = 3600000  # 1 hour
+                    elif time_range_hours <= 24:
+                        tick_interval = 10800000  # 3 hours
+                    elif time_range_hours <= 72:
+                        tick_interval = 21600000  # 6 hours
+                    else:
+                        tick_interval = 43200000  # 12 hours
+
+                    # Create the line plot using Plotly
+                    fig = px.line(df_display, x="time", y=list(server_names.values()),
+                                labels={"value": metric_labels[metric_id], "variable": "Server"},
+                                title=metric_labels[metric_id], color_discrete_sequence=px.colors.qualitative.Set1,
+                                line_shape="linear")  # Ensures smooth connection
+
+                    # Update layout with dynamic Y-axis limit
+                    fig.update_layout(yaxis=dict(range=[0, get_y_axis_limit(y_max)]))
+
+                    # Ensure missing data points are connected
+                    fig.update_traces(connectgaps=True)
+
+                    # Function to customize time labels dynamically
+                    def custom_time_labels(timestamps):
+                        labels = []
+                        for t in timestamps:
+                            # Show full date format at midnight, otherwise show just time
+                            if t.hour == 0 and t.minute == 0:
+                                labels.append(t.strftime("%d-%m %H:%M"))
+                            else:
+                                labels.append(t.strftime("%H:%M"))
+                        return labels
+
+                    # Generate tick values dynamically based on the time range
+                    if time_range_hours <= 6:
+                        tick_interval = "1H"
+                    elif time_range_hours <= 24:
+                        tick_interval = "3H"
+                    elif time_range_hours <= 72:
+                        tick_interval = "6H"
+                    else:
+                        tick_interval = "12H"
+
+                    # Create tick values for x-axis
+                    tick_values = pd.date_range(df_display["time"].min(), df_display["time"].max(), freq=tick_interval)
+                    tick_labels = custom_time_labels(tick_values)  # Format labels
+
+                    # Update x-axis with custom tick labels
+                    fig.update_layout(
+                        xaxis=dict(
+                            tickvals=tick_values,
+                            ticktext=tick_labels
+                        )
+                    )
+
+                    # Alternate between two columns for better visual balance
+                    col = col1 if i % 2 == 0 else col2
+                    with col:
+                        st.plotly_chart(fig, use_container_width=True)
 
         else:
-            # Plot CPU Usage Graph
-            fig_cpu = px.line(df, x="Time", y=[f"CPU {s}" for s in selected_servers], 
-                            title="CPU Usage Over Time", labels={"value": "CPU Usage (%)", "variable": "Server"},
-                            template="plotly_dark")
-            fig_cpu.update_layout(xaxis_title="Time", yaxis_title="CPU Usage (%)", hovermode="x unified")
+            # Show an error message if no valid data is available
+            st.error("No valid data available for any metrics.")
 
-            # Plot Memory Usage Graph
-            fig_memory = px.line(df, x="Time", y=[f"Memory {s}" for s in selected_servers], 
-                                title="Memory Usage Over Time", labels={"value": "Memory Usage (%)", "variable": "Server"},
-                                template="plotly_dark")
-            fig_memory.update_layout(xaxis_title="Time", yaxis_title="Memory Usage (%)", hovermode="x unified")
 
-            # Plot Garbage Collection Graph
-            fig_gc = px.line(df, x="Time", y=[f"GC {s}" for s in selected_servers], 
-                            title="Garbage Collection Over Time", labels={"value": "GC Events", "variable": "Server"},
-                            template="plotly_dark")
-            fig_gc.update_layout(xaxis_title="Time", yaxis_title="GC Events", hovermode="x unified")
-
+    # if st.session_state.fetch_data_clicked:
+    #     # KPI Metrics Section
+    #     st.subheader("📈 Performance Overview")
+    #     col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+    #     col_kpi1.metric("Average CPU Utilization", "45%")
+    #     col_kpi2.metric("Average Memory Utilization", "60%")
+    #     col_kpi3.metric("Total Errors", "12")
         
-        # Anotehr way to plot graphs - 
-        # If no server selected, show data for all servers
-        # if server_name:
-        #     filtered_df = df_dt[df_dt["dt.entity.host"].isin(server_name)]
-        # else:
-        #     filtered_df = df_dt  # Show all servers
-
-        # # Pivot Data for Plotly (Each Server as a Separate Column)
-        # pivot_df = filtered_df.pivot(index="time", columns="dt.entity.host", values="value").reset_index()
-
-        # # Ensure filtered data is not empty before plotting
-        # if pivot_df.empty:
-        #     st.warning("No data available for the selected server(s).")
-        # else:
-        #     fig = px.line(
-        #         pivot_df,
-        #         x="time",
-        #         y=pivot_df.columns[1:],  # Select all server columns dynamically
-        #         title="CPU Usage Over Time",
-        #         labels={"value": "CPU Usage (%)", "time": "Timestamp", "dt.entity.host": "Server"},
-        #         markers=True,
-        #     )
-
-
-        #invove rest apis  - 
-        df_pivot = fetch_and_process_data('builtin:host.mem.usage','2025-03-08T01:00:00', '2025-03-09T02:00:00')
-        # Plotly figure
-        fig = px.line(
-            df_pivot,
-            x="time",  # X-axis: Time
-            y=df_pivot.columns[1:],  # Y-axis: All metric columns (skip 'time')
-            labels={"value": "Metric Value", "time": "Timestamp"},
-            title="Server Metrics Over Time"
-        )
-
+    #     # Generate CPU, Memory, and GC data
+    #     time_series = pd.date_range(start=start_date, end=end_date, freq="1H")
         
-        # Display the graphs with zoom and export options
-        st.subheader("📊 Server Performance Metrics")
+    #     selected_servers = applications_server.get(app_name, [])
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.plotly_chart(fig_cpu, use_container_width=True)
-            st.download_button("Download CPU Data", df.to_csv(index=False), file_name="cpu_data.csv")
+    #     # Dynatrace Section
+    #     st.subheader("📊 Dynatrace Metrics")
 
-        with col2:
-            st.plotly_chart(fig_memory, use_container_width=True)
-            st.download_button("Download Memory Data", df.to_csv(index=False), file_name="memory_data.csv")
+    #     # Load default and application-specific metrics
+    #     default_metrics = config.get("default_metrics", [])
+    #     application_metrics = config.get("applications", {}).get(app_name, {}).get("metrics", [])
 
-        with col3:
-            st.plotly_chart(fig_gc, use_container_width=True)
-            st.download_button("Download GC Data", df.to_csv(index=False), file_name="gc_data.csv")
-        
-        # 🎨 Plotly Express Line Chart
-        def plot_metrics(df_pivot):
-            # Reset index to make 'time' a column for Plotly
-            df_pivot = df_pivot.reset_index()
+    #     # Combine default and application-specific metrics
+    #     metric_ids = [metric["id"] for metric in default_metrics + application_metrics]
+    #     metric_labels = {metric["id"]: metric["label"] for metric in default_metrics + application_metrics}
 
-            # ✅ Rename columns to extract only the hostname
-            new_columns = {col: col.split("|")[-1].strip() for col in df_pivot.columns if col != "time"}
-            df_pivot.rename(columns=new_columns, inplace=True)
+    #     # print(default_metrics)
+    #     # Fetch and process metric data
 
-            # ✅ Plot without melting
-            fig = px.line(df_pivot, x='time', y=df_pivot.columns[1:], 
-                        title="Metric Trends", labels={'value': 'Metric Value'},
-                        markers=True)
+    #     # Fetch data for each metric ID separately and combine results
+    #     df_list = []
+    #     valid_metric_ids = []  # Keep track of valid metrics
 
-            fig.update_layout(
-                legend_title_text="Hostname",  # ✅ Legend will only show hostnames
-                xaxis_title="Time",
-                yaxis_title="Metric Value",
-                hovermode="x"
-            )
-
-            return fig
-        
-        with col4:
-            st.plotly_chart(plot_metrics(df_pivot), use_container_width=True)  # Ensure correct DataFrame is used
-
-            # 🔹 Use df_pivot for downloading, since it contains processed data
-            st.download_button(
-                "Download CPU Data",
-                df_pivot.to_csv(index=False),
-                file_name="cpu_data.csv",
-                mime="text/csv"
-            )
+    #     for metric_id in metric_ids:
+    #         #df = fetch_and_process_data([metric_id], start_date, end_date)  # Pass one metric at a time
+    #         df = fetch_and_process_data([metric_id], format_datetime_custom(start_date), format_datetime_custom(end_date), granularity)
             
+    #         if not df.empty:  # Only append if data exists
+    #             df_list.append(df)
+    #             valid_metric_ids.append(metric_id)  # Track valid metric
+    #         else:
+    #             # Create an empty DataFrame with time range to show as a placeholder
+    #             df_empty = pd.DataFrame({"time": pd.date_range(start=start_date, end=end_date, freq="5min")})
+    #             df_empty[metric_id] = None  # Fill metric column with NaN (ensures blank graph)
+    #             df_list.append(df_empty)
+    #             valid_metric_ids.append(metric_id)  # Still track this metric for plotting
+
+        
+    #     # Ensure we have at least one valid dataframe before merging
+    #     if df_list:
+    #         # Merge all dataframes on the "time" column, ignoring completely missing ones
+    #         df_pivot = pd.concat(df_list, axis=1).reset_index()
+
+    #         # Drop extra "index" column if present
+    #         if "index" in df_pivot.columns:
+    #             df_pivot = df_pivot.drop(columns=["index"])
+
+    #         # Drop duplicate "time" columns, keeping only one
+    #         df_pivot = df_pivot.loc[:, ~df_pivot.columns.duplicated()]
+
+    #         # Ensure 'time' is in datetime format
+    #         df_pivot["time"] = pd.to_datetime(df_pivot["time"], errors="coerce")
+
+    #         # Create two columns layout
+    #         col1, col2 = st.columns(2)
+
+    #         # Loop through each valid metric and plot it
+    #         for i, metric_id in enumerate(valid_metric_ids):  # Use `valid_metric_ids` to avoid missing ones
+    #             # Find all matching columns (metrics for different hosts)
+    #             matching_columns = [col for col in df_pivot.columns if metric_id in col]
+
+    #             if matching_columns:
+    #                 # Extract server IDs from column names
+    #                 server_names = {col: get_friendly_server_name(col.split(" | ")[-1]) for col in matching_columns}
+
+    #                 # Rename columns to show only server names
+    #                 df_display = df_pivot.rename(columns=server_names)
+
+    #                 # Determine max Y value from the dataset
+    #                 y_max = df_display[list(server_names.values())].max().max()  # Find highest Y value
+
+    #                 # Calculate time range in hours
+    #                 time_range_hours = (df_display["time"].max() - df_display["time"].min()).total_seconds() / 3600
+
+    #                 # Determine suitable tick interval
+    #                 if time_range_hours <= 6:
+    #                     tick_interval = 3600000  # 1 hour
+    #                 elif time_range_hours <= 24:
+    #                     tick_interval = 10800000  # 3 hours
+    #                 elif time_range_hours <= 72:
+    #                     tick_interval = 21600000  # 6 hours
+    #                 else:
+    #                     tick_interval = 43200000  # 12 hours
+
+                    
+
+    #                 # Create the line plot
+    #                 fig = px.line(df_display, x="time", y=list(server_names.values()),
+    #                             labels={"value": metric_labels[metric_id], "variable": "Server"},
+    #                             title=metric_labels[metric_id], color_discrete_sequence=px.colors.qualitative.Set1,
+    #                             line_shape="linear")  # Ensures smooth connection
+                    
+    #                 # Update layout with dynamic Y-axis
+    #                 fig.update_layout(yaxis=dict(range=[0, get_y_axis_limit(y_max)]))
+
+    #                 # Connect missing data points
+    #                 fig.update_traces(connectgaps=True)
+
+                    
+    #                 # Function to format time labels dynamically
+    #                 def custom_time_labels(timestamps):
+    #                     labels = []
+    #                     for t in timestamps:
+    #                         if t.hour == 0 and t.minute == 0:  # Midnight case
+    #                             labels.append(t.strftime("%d-%m %H:%M"))
+    #                         else:  # Regular case
+    #                             labels.append(t.strftime("%H:%M"))
+    #                     return labels
+                    
+    #                 # Generate tick values (e.g., every hour based on dynamic interval)
+    #                 time_range_hours = (df_display["time"].max() - df_display["time"].min()).total_seconds() / 3600
+
+    #                 if time_range_hours <= 6:
+    #                     tick_interval = "1H"
+    #                 elif time_range_hours <= 24:
+    #                     tick_interval = "3H"
+    #                 elif time_range_hours <= 72:
+    #                     tick_interval = "6H"
+    #                 else:
+    #                     tick_interval = "12H"
+
+    #                 # Convert time column to list and generate formatted labels
+    #                 tick_values = pd.date_range(df_display["time"].min(), df_display["time"].max(), freq=tick_interval)
+    #                 tick_labels = custom_time_labels(tick_values)
+
+    #                 # Update x-axis with custom tick labels
+    #                 fig.update_layout(
+    #                     xaxis=dict(
+    #                         tickvals=tick_values,
+    #                         ticktext=tick_labels
+    #                     )
+    #                 )
+
+    #                 # Alternate between columns
+    #                 col = col1 if i % 2 == 0 else col2
+    #                 with col:
+    #                     st.plotly_chart(fig, use_container_width=True)
+
+    #     else:
+    #         st.error("No valid data available for any metrics.")
+
+
         # LoadRunner Section
         st.subheader("📊 LoadRunner Metrics")
 
@@ -663,3 +819,143 @@ with col2:
     st.session_state.fetch_data_clicked = False    
 
 
+# with col3:
+#     st.header("📝 Observations")
+
+#     if not df_pivot.empty:
+#         # Ensure 'time' column is in datetime format
+#         df_pivot["time"] = pd.to_datetime(df_pivot["time"])
+
+#         # Identify CPU columns explicitly
+#         cpu_columns = [col for col in df_pivot.columns if "cpu.usage" in col]
+
+#         # Find maximum CPU usage for each timestamp
+#         df_pivot["max_cpu_usage"] = df_pivot[cpu_columns].max(axis=1)
+
+#         # Get the top 4 highest spikes
+#         top_spikes = df_pivot.nlargest(4, "max_cpu_usage")
+
+#         # Extract timestamps of top spikes
+#         spike_times = top_spikes["time"].dt.strftime("%d-%m %H:%M").tolist()
+#         spike_values = top_spikes["max_cpu_usage"].tolist()
+
+#         # Generate Observations
+#         observations = "🔹 **Top 4 CPU Spikes:**\n"
+#         for i in range(len(spike_times)):
+#             observations += f"   - 📍 **{spike_times[i]}** → {spike_values[i]:.2f}% CPU\n"
+
+#         st.text_area("Here are our observations:", value=observations, height=200, disabled=True)
+
+#     else:
+#         st.text_area("Here are our observations:", value="No data available for analysis.", height=400, disabled=True)
+
+
+with col3:
+    st.header("📝 System Observations")
+
+    if not df_pivot.empty:
+        # Ensure 'time' column is in datetime format
+        df_pivot["time"] = pd.to_datetime(df_pivot["time"])
+
+        # Identify CPU columns explicitly
+        cpu_columns = [col for col in df_pivot.columns if "cpu.usage" in col]
+        memory_column = [col for col in df_pivot.columns if "builtin:host.mem.usage" in col]
+
+        # Compute Max CPU Usage per timestamp
+        df_pivot["max_cpu_usage"] = df_pivot[cpu_columns].max(axis=1) if cpu_columns else None
+
+        # Compute average CPU utilization on the full dataset (excluding NaN values)
+        avg_cpu = df_pivot["max_cpu_usage"].dropna().mean() if cpu_columns else None
+
+        # Get the top 50 highest CPU spikes
+        if cpu_columns:
+            top_50_cpu_spikes = df_pivot.nlargest(50, "max_cpu_usage")
+            top_50_cpu_spikes = top_50_cpu_spikes.sort_values(by="time")
+
+            # Filter spikes that occur at least 5 minutes apart
+            selected_cpu_spikes = []
+            last_selected_time = None
+            for _, row in top_50_cpu_spikes.iterrows():
+                current_time = row["time"]
+                if last_selected_time is None or (current_time - last_selected_time).total_seconds() > 300:
+                    selected_cpu_spikes.append(row)
+                    last_selected_time = current_time
+
+            # Convert list to DataFrame
+            filtered_cpu_spikes = pd.DataFrame(selected_cpu_spikes)
+
+            # Get only the top 5 CPU spikes
+            top_final_cpu_spikes = filtered_cpu_spikes.nlargest(5, "max_cpu_usage")
+
+            # Extract timestamps & values
+            cpu_times = top_final_cpu_spikes["time"].dt.strftime("%d-%m %H:%M").tolist()
+            cpu_values = top_final_cpu_spikes["max_cpu_usage"].tolist()
+        else:
+            cpu_times, cpu_values = [], []
+
+        # --- Memory Spike Detection ---
+        if memory_column:
+            
+            # Compute Max Memory Usage per timestamp (assuming multiple columns can exist)
+            df_pivot["max_mem_usage"] = df_pivot[memory_column].max(axis=1)
+
+            # Compute average Memory utilization on full dataset (excluding NaN values)
+            avg_memory = df_pivot["max_mem_usage"].dropna().mean()
+
+            # Get the top 50 highest Memory spikes
+            memory_threshold = df_pivot["max_mem_usage"].quantile(0.95)
+            memory_spikes = df_pivot[df_pivot["max_mem_usage"] > memory_threshold].dropna()
+            memory_spikes = memory_spikes.nlargest(50, "max_mem_usage").sort_values(by="time")
+
+            # Filter memory spikes that occur at least 5 minutes apart
+            selected_memory_spikes = []
+            last_selected_time = None
+            for _, row in memory_spikes.iterrows():
+                current_time = row["time"]
+                if last_selected_time is None or (current_time - last_selected_time).total_seconds() > 300:
+                    selected_memory_spikes.append(row)
+                    last_selected_time = current_time
+
+            # Convert list to DataFrame
+            filtered_memory_spikes = pd.DataFrame(selected_memory_spikes)
+
+            # Get only the top 5 memory spikes
+            top_final_memory_spikes = filtered_memory_spikes.nlargest(5, "max_mem_usage")
+
+            # Extract timestamps & values
+            mem_times = top_final_memory_spikes["time"].dt.strftime("%d-%m %H:%M").tolist()
+            mem_values = top_final_memory_spikes["max_mem_usage"].tolist()
+        else:
+            mem_times, mem_values = [], []
+
+        # Generate Observations
+        observations = "📊 **System Utilization Summary:**\n"
+
+        # Include average CPU & Memory utilization in summary
+        observations += f"   - 🖥 **Average CPU Utilization:** {avg_cpu:.2f}%\n" if avg_cpu is not None else "   - 🖥 **Average CPU Utilization:** N/A\n"
+        observations += f"   - 🗂 **Average Memory Utilization:** {avg_memory:.2f}%\n\n" if avg_memory is not None else "   - 🗂 **Average Memory Utilization:** N/A\n\n"
+
+
+        # Include CPU utilization in summary
+        if cpu_times:
+            observations += "🔹 **Top 5 Major CPU Spikes Detected:**\n"
+            for i in range(len(cpu_times)):
+                observations += f"   - 📍 **{cpu_times[i]}** → {cpu_values[i]:.2f}% CPU\n"
+        else:
+            observations += "🔹 **No Major CPU Spikes Detected.**\n"
+
+        # Include Memory utilization in summary
+        if mem_times:
+            observations += "\n🔹 **Top 5 Major Memory Spikes Detected:**\n"
+            for i in range(len(mem_times)):
+                observations += f"   - 📍 **{mem_times[i]}** → {mem_values[i]:.2f}% Memory\n"
+        else:
+            observations += "\n🔹 **No Major Memory Spikes Detected.**\n"
+
+        # Show summary metrics
+        # st.metric(label="Total Major CPU Spikes", value=len(cpu_times) if cpu_times else "N/A")
+        # st.metric(label="Total Major Memory Spikes", value=len(mem_times) if mem_times else "N/A")
+        st.text_area("Here are observations:", value=observations, height=600, disabled=False)
+
+    else:
+        st.text_area("Here are observations:", value="No data available for analysis.", height=300, disabled=True)
