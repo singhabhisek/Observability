@@ -1,7 +1,7 @@
 {
   "dynatrace": {
       "environment": "https://iij82061.live.dynatrace.com",
-      "api_token": "dt0c01.ZTUWASSBSSYZFXNNX4W5NHP2.RDPYFREUA3YNGR723IJCF2ICJ5WLRPJIG3MAZHU2ES4ED5LS62VWPEHLDEHWDHKZ"
+      "api_token": "YOUR_TOEKN"
   },
   "splunk": {
       "host": "splunk_host",
