@@ -1,0 +1,21 @@
+Timestamp	Status	URL	Count	Error Message	Server	Error Description
+2025-02-24 23:13:31	503	/api/processOrder	75	Service Unavailable	web-server-01
+2025-02-24 18:30:46	500	/api/getOrderDetails	70	Internal Server Error	web-server-04
+2025-02-24 21:16:00	503	/api/processPayment	144	Service Unavailable	web-server-02
+2025-02-25 02:13:17	503	/api/externalRequest	200	Service Unavailable	web-server-01
+2025-02-25 08:53:43	500	/api/getOrderDetails	153	Internal Server Error	web-server-02
+2025-02-25 12:08:07	502	/api/processOrder	100	Bad Gateway	web-server-01
+2025-02-24 18:49:53	500	/api/getOrderDetails	99	Internal Server Error	web-server-04
+2025-02-24 20:29:55	502	/api/processPayment	75	Bad Gateway	web-server-02
+2025-02-25 05:30:33	504	/api/processPayment	90	Gateway Timeout	web-server-04
+2025-02-25 11:58:56	503	/api/processPayment	72	Service Unavailable	web-server-02
+2025-02-26 15:51:45	503	/api/externalRequest	82	Service Unavailable	web-server-02
+2025-02-26 01:57:18	500	/api/getUserDetails	92	Internal Server Error	web-server-02
+2025-02-25 20:06:36	503	/api/processOrder	150	Service Unavailable	web-server-04
+2025-02-26 16:41:48	500	/checkout	96	Internal Server Error	web-server-04
+2025-02-26 05:17:02	502	/api/processOrder	198	Bad Gateway	web-server-01
+2025-02-25 17:26:50	500	/checkout	163	Internal Server Error	web-server-03
+2025-02-26 02:31:27	500	/api/processOrder	145	Internal Server Error	web-server-02
+2025-02-26 00:33:25	500	/api/externalRequest	198	Internal Server Error	web-server-01
+2025-02-26 02:31:09	500	/api/processOrder	107	Internal Server Error	web-server-04
+2025-02-26 12:39:26	503	/checkout	186	Service Unavailable	web-server-03
